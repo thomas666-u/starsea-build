@@ -13,7 +13,7 @@ on:
         default: "false"
 
 jobs:
-  # ============ 主产物：Windows msi + 便携版 ============
+  # ============ 主产物：Windows 便携版（app-image，必成功）+ msi（尽力而为） ============
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
@@ -43,35 +43,32 @@ jobs:
           key: gradle-desktop-win-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-desktop-win-
 
-      - name: Build Windows packages (msi + app-image)
+      - name: Build app-image (必产物，无需 WiX)
         shell: bash
         run: |
-          # 先构建（允许 msi 打包失败，但编译必须成功）
-          set +e
-          ./gradlew :desktop-app:packageDistributionForCurrentOS --no-daemon --console=plain 2>&1 | tee /tmp/build.log
-          GRADLE_EXIT=$?
-          set -e
-          # 编译失败（没有 app-image）才真正报错
-          if [ ! -d "desktop-app/build/compose/binaries/main/app/StarSea" ]; then
-            echo "FATAL: app-image 未生成，编译失败"
-            exit $GRADLE_EXIT
-          fi
-          echo "app-image 生成成功（msi 状态见上方日志，exit=$GRADLE_EXIT）"
+          ./gradlew :desktop-app:packageAppImage --no-daemon --console=plain 2>&1 | tee /tmp/build.log
+          test -d "desktop-app/build/compose/binaries/main/app/StarSea" || {
+            echo "FATAL: app-image 未生成"; exit 1; }
+          echo "app-image OK"
+
+      - name: Build msi (尽力而为，失败不阻断)
+        shell: bash
+        continue-on-error: true
+        run: |
+          ./gradlew :desktop-app:packageMsi --no-daemon --console=plain 2>&1 | tee -a /tmp/build.log || true
+          ls desktop-app/build/compose/binaries/main/msi/ 2>/dev/null || echo "msi 未产出（见日志）"
 
       - name: Prepare artifacts
         shell: bash
         run: |
           B=desktop-app/build/compose/binaries/main
           TAG=$(date +%Y%m%d_%H%M%S)
-          # msi 安装包
+          # msi（可能没有）
           if ls "$B/msi/"*.msi 1>/dev/null 2>&1; then
             cp "$B/msi/"*.msi "StarSea_Win_MSI_$TAG.msi"
           fi
           # 便携版 zip（必产物）
-          if [ -d "$B/app/StarSea" ]; then
-            (cd "$B/app" && 7z a -tzip "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
-          fi
-          # 日志
+          (cd "$B/app" && 7z a -tzip "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
           tar czf "build_log_win_$TAG.tar.gz" /tmp/build.log 2>/dev/null || true
           echo "BUILD_TAG=$TAG" >> $GITHUB_ENV
           ls -la *.msi *.zip 2>/dev/null || true
@@ -118,7 +115,7 @@ jobs:
           python3 scripts/lanzou_upload.py cleanup "Build" 5 "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
           python3 scripts/lanzou_upload.py cleanup "logs" 5 "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
 
-  # ============ 次要：Linux app-image + deb ============
+  # ============ Linux：仅 GitHub artifacts（不上传蓝奏云） ============
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -148,56 +145,27 @@ jobs:
           key: gradle-desktop-linux-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-desktop-linux-
 
-      - name: Build Linux packages
-        shell: bash
+      - name: Build Linux app-image
         run: |
-          set +e
-          ./gradlew :desktop-app:packageDistributionForCurrentOS --no-daemon --console=plain 2>&1 | tee /tmp/build.log
-          GRADLE_EXIT=$?
-          set -e
-          if [ ! -d "desktop-app/build/compose/binaries/main/app/StarSea" ]; then
-            echo "FATAL: app-image 未生成，编译失败"
-            exit $GRADLE_EXIT
-          fi
+          ./gradlew :desktop-app:packageAppImage --no-daemon --console=plain 2>&1 | tee /tmp/build.log
+          test -d "desktop-app/build/compose/binaries/main/app/StarSea" || {
+            echo "FATAL: app-image 未生成"; exit 1; }
 
       - name: Prepare artifacts
-        shell: bash
         run: |
           TAG=$(date +%Y%m%d_%H%M%S)
-          B=desktop-app/build/compose/binaries/main
-          # 便携版 zip
-          if [ -d "$B/app/StarSea" ]; then
-            (cd "$B/app" && zip -rq "$GITHUB_WORKSPACE/StarSea_Linux_Portable_$TAG.zip" StarSea)
-          fi
-          # deb（可能失败，容错）
-          ls "$B/deb/"*.deb 1>/dev/null 2>&1 && cp "$B/deb/"*.deb "StarSea_Linux_$TAG.deb" || true
-          tar czf "build_log_linux_$TAG.tar.gz" /tmp/build.log 2>/dev/null || true
+          cd desktop-app/build/compose/binaries/main/app
+          zip -rq "$GITHUB_WORKSPACE/StarSea_Linux_Portable_$TAG.zip" StarSea
+          cd "$GITHUB_WORKSPACE"
           echo "BUILD_TAG=$TAG" >> $GITHUB_ENV
 
       - name: Upload artifacts (GitHub)
         uses: actions/upload-artifact@v4
         with:
           name: StarSea-linux-x64
-          if-no-files-found: warn
+          if-no-files-found: error
           path: |
             StarSea_Linux_*.zip
-            StarSea_Linux_*.deb
-
-      - name: Install Python deps
-        run: pip install requests -q
-        shell: bash
-
-      - name: Upload Linux packages to Lanzou
-        env:
-          LANZOU_USER: ${{ secrets.LANZOU_USER }}
-          LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
-        shell: bash
-        run: |
-          TAG=${{ env.BUILD_TAG }}
-          for f in "StarSea_Linux_Portable_$TAG.zip" "StarSea_Linux_$TAG.deb"; do
-            [ -f "$f" ] && python3 scripts/lanzou_upload.py upload-nolog "$f" "$f" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
-          done
-          [ -f "build_log_linux_$TAG.tar.gz" ] && python3 scripts/lanzou_upload.py upload-nolog "build_log_linux_$TAG.tar.gz" "build_log_linux_$TAG.tar.gz" "logs" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
 
   # ============ 实验性：GraalVM Native Image（可能失败） ============
   native-windows:
