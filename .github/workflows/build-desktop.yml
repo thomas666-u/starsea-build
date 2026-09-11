@@ -46,27 +46,31 @@ jobs:
       - name: Build app-image (必产物：uber jar + 原生 jpackage，绕开 Compose 打包层)
         shell: bash
         run: |
-          set +e
-          # 1) 打 uber jar（zipkin 的 jpackage 层是问题源头，直接绕开）
+          set -x
+          # 1) 打 uber jar（Compose 插件的 jpackage 层有 Input length=1 bug，绕开）
           ./gradlew :desktop-app:packageUberJarForCurrentOS --no-daemon --console=plain 2>&1 | tee /tmp/build.log
-          EXIT=$?
-          set -e
-          JAR=$(ls desktop-app/build/compose/jars/StarSea-desktop-app-*.jar 2>/dev/null | head -1)
-          if [ $EXIT -ne 0 ] || [ -z "$JAR" ]; then
-            echo "FATAL: uber jar 未生成"; exit ${EXIT:-1}
+          # jar 名形如 StarSea-windows-x64-1.0.0.jar
+          JAR=$(ls desktop-app/build/compose/jars/StarSea-*.jar 2>/dev/null | head -1)
+          if [ -z "$JAR" ]; then
+            echo "FATAL: uber jar 未生成"; ls desktop-app/build/compose/jars/ 2>/dev/null; exit 1
           fi
           echo "uber jar OK: $JAR"
 
           # 2) 用 JDK 自带 jpackage 直接打 app-image（不经 Compose 插件）
-          "$JAVA_HOME/bin/jpackage" \
+          #    --input 指 jars 目录（uber jar 就在这里）
+          JAR_DIR=$(dirname "$JAR")
+          rm -rf desktop-app/build/jpackage-out
+          "$JAVA_HOME/bin/jpackage.exe" \
             --type app-image \
             --name StarSea \
-            --input desktop-app/build/compose/libs \
+            --input "$JAR_DIR" \
             --main-jar "$(basename "$JAR")" \
             --main-class com.stars.app.MainKt \
             --dest desktop-app/build/jpackage-out \
             --win-console \
             --java-options "-Xmx512m" 2>&1 | tee -a /tmp/build.log
+          JP_EXIT=$?
+          echo "jpackage exit: $JP_EXIT"
           test -d "desktop-app/build/jpackage-out/StarSea" || {
             echo "FATAL: app-image 未生成"; exit 1; }
           echo "app-image OK"
