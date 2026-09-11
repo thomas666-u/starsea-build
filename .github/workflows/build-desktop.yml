@@ -46,9 +46,18 @@ jobs:
       - name: Build app-image (必产物，无需 WiX)
         shell: bash
         run: |
+          set +e
           ./gradlew :desktop-app:packageAppImage --no-daemon --console=plain 2>&1 | tee /tmp/build.log
-          test -d "desktop-app/build/compose/binaries/main/app/StarSea" || {
-            echo "FATAL: app-image 未生成"; exit 1; }
+          EXIT=$?
+          set -e
+          # 失败时导出 jpackage 明细日志（root cause 一直藏在 err.txt，这次必须看到）
+          echo "===== jpackage logs ====="
+          find desktop-app/build/compose/logs -name "*.txt" -exec sh -c 'echo "--- {} ---"; cat "{}"' \; 2>/dev/null || true
+          if [ $EXIT -ne 0 ] || [ ! -d "desktop-app/build/compose/binaries/main/app/StarSea" ]; then
+            # 保留诊断包
+            tar czf jpackage_diag.tar.gz desktop-app/build/compose/logs desktop-app/build/compose/tmp 2>/dev/null || true
+            echo "FATAL: app-image 未生成"; exit $EXIT
+          fi
           echo "app-image OK"
 
       - name: Build msi (尽力而为，失败不阻断)
@@ -56,7 +65,9 @@ jobs:
         continue-on-error: true
         run: |
           ./gradlew :desktop-app:packageMsi --no-daemon --console=plain 2>&1 | tee -a /tmp/build.log || true
-          ls desktop-app/build/compose/binaries/main/msi/ 2>/dev/null || echo "msi 未产出（见日志）"
+          echo "===== msi jpackage logs ====="
+          find desktop-app/build/compose/logs/packageMsi -name "*.txt" -exec sh -c 'echo "--- {} ---"; cat "{}"' \; 2>/dev/null || true
+          ls desktop-app/build/compose/binaries/main/msi/ 2>/dev/null || echo "msi 未产出"
 
       - name: Prepare artifacts
         shell: bash
@@ -72,6 +83,16 @@ jobs:
           tar czf "build_log_win_$TAG.tar.gz" /tmp/build.log 2>/dev/null || true
           echo "BUILD_TAG=$TAG" >> $GITHUB_ENV
           ls -la *.msi *.zip 2>/dev/null || true
+
+      - name: Upload diagnostics (if build failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jpackage-diagnostics
+          if-no-files-found: ignore
+          path: |
+            jpackage_diag.tar.gz
+            /tmp/build.log
 
       - name: Upload artifacts (GitHub)
         uses: actions/upload-artifact@v4
