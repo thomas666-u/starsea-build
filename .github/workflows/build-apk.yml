@@ -1,0 +1,121 @@
+name: Build StarSea
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "源仓库分支/tag/commit（默认 main）"
+        required: false
+        default: "main"
+      build_type:
+        description: "构建类型"
+        required: false
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      SOURCE_REPO: thomas666-u/Starseatool
+
+    steps:
+      - name: Checkout source from private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          ref: ${{ github.event.inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Ensure Android SDK
+        run: |
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          yes | sdkmanager "platforms;android-34" "build-tools;34.0.0" >/dev/null 2>&1 || true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Setup CI environment
+        run: |
+          mkdir -p ~/.gradle
+          echo "android.aapt2FromMavenOverride=" >> ~/.gradle/gradle.properties
+          echo "org.gradle.daemon=false" >> ~/.gradle/gradle.properties
+          echo "org.gradle.parallel=false" >> ~/.gradle/gradle.properties
+          echo "org.gradle.configuration-cache=false" >> ~/.gradle/gradle.properties
+
+      - name: Verify keystore
+        run: test -f starsea-release.jks && echo "keystore OK" || { echo "ERROR: keystore not found"; exit 1; }
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew assemble${{ github.event.inputs.build_type == 'release' && 'Release' || 'Debug' }} --no-daemon --no-parallel 2>&1 | tee /tmp/build.log
+        shell: bash
+
+      - name: Prepare artifacts
+        run: |
+          APK_PATH="app/build/outputs/apk/${{ github.event.inputs.build_type }}/app-${{ github.event.inputs.build_type }}.apk"
+          VERSION=$(grep versionName app/build.gradle.kts | head -1 | sed 's/.*= "//;s/".*//')
+          VERSION_CODE=$(grep versionCode app/build.gradle.kts | head -1 | sed 's/.*= //')
+          BUILD_TAG="${VERSION}.${VERSION_CODE}_$(date +%Y%m%d_%H%M%S)"
+          cp "$APK_PATH" "Starsea_${BUILD_TAG}.apk"
+          # gopeed .so
+          SO_FILE=$(find app/src/main/jniLibs -name 'libgojni.so' 2>/dev/null | head -1)
+          if [ -n "$SO_FILE" ]; then cp "$SO_FILE" "libgojni_${BUILD_TAG}.so" 2>/dev/null; fi
+          # 压缩日志
+          tar czf "build_log_${BUILD_TAG}.tar.gz" /tmp/build.log app/build/reports/ app/build/outputs/logs/ 2>/dev/null || true
+          echo "BUILD_TAG=$BUILD_TAG" >> $GITHUB_ENV
+
+      - name: Install Python deps
+        run: pip install requests -q
+
+      - name: Upload APK to Lanzou (Build folder)
+        env:
+          LANZOU_USER: ${{ secrets.LANZOU_USER }}
+          LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
+        run: |
+          python3 scripts/lanzou_upload.py upload-nolog "Starsea_${{ env.BUILD_TAG }}.apk" "Starsea_${{ env.BUILD_TAG }}.apk" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+
+      - name: Upload .so to Lanzou (Build folder)
+        env:
+          LANZOU_USER: ${{ secrets.LANZOU_USER }}
+          LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
+        run: |
+          if [ -f "libgojni_${{ env.BUILD_TAG }}.so" ]; then
+            python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.so" "libgojni_${{ env.BUILD_TAG }}.so" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          fi
+
+      - name: Upload build log to Lanzou (logs folder)
+        env:
+          LANZOU_USER: ${{ secrets.LANZOU_USER }}
+          LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
+        run: |
+          if [ -f "build_log_${{ env.BUILD_TAG }}.tar.gz" ]; then
+            python3 scripts/lanzou_upload.py upload-nolog "build_log_${{ env.BUILD_TAG }}.tar.gz" "build_log_${{ env.BUILD_TAG }}.tar.gz" "logs" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          fi
+
+      - name: Cleanup old builds (keep 5)
+        env:
+          LANZOU_USER: ${{ secrets.LANZOU_USER }}
+          LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
+        run: |
+          python3 scripts/lanzou_upload.py cleanup "Build" 5 "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          python3 scripts/lanzou_upload.py cleanup "logs" 5 "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
