@@ -75,7 +75,8 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          ./gradlew :desktop-app:packageMsi --no-daemon --console=plain 2>&1 | tee -a /tmp/build.log || true
+          set +e
+          ./gradlew :desktop-app:packageMsi --no-daemon --console=plain 2>&1 | tee -a /tmp/build.log
           echo "===== msi jpackage logs ====="
           find desktop-app/build/compose/logs/packageMsi -name "*.txt" -exec sh -c 'echo "--- {} ---"; cat "{}"' \; 2>/dev/null || true
           ls desktop-app/build/compose/binaries/main/msi/ 2>/dev/null || echo "msi 未产出"
@@ -83,14 +84,13 @@ jobs:
       - name: Prepare artifacts
         shell: bash
         run: |
-          B=desktop-app/build/compose/binaries/main
           TAG=$(date +%Y%m%d_%H%M%S)
-          # msi（可能没有）
-          if ls "$B/msi/"*.msi 1>/dev/null 2>&1; then
-            cp "$B/msi/"*.msi "StarSea_Win_MSI_$TAG.msi"
+          # msi（Compose 插件路径，可能没有）
+          if ls desktop-app/build/compose/binaries/main/msi/*.msi 1>/dev/null 2>&1; then
+            cp desktop-app/build/compose/binaries/main/msi/*.msi "StarSea_Win_MSI_$TAG.msi"
           fi
-          # 便携版 zip（必产物）
-          (cd "$B/app" && 7z a -tzip "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
+          # 便携版 zip（必产物，来自原生 jpackage 的 app-image）
+          (cd desktop-app/build/jpackage-out && 7z a -tzip "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
           tar czf "build_log_win_$TAG.tar.gz" /tmp/build.log 2>/dev/null || true
           echo "BUILD_TAG=$TAG" >> $GITHUB_ENV
           ls -la *.msi *.zip 2>/dev/null || true
