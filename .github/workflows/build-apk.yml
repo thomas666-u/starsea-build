@@ -62,7 +62,8 @@ jobs:
           echo "org.gradle.configuration-cache=false" >> ~/.gradle/gradle.properties
 
       - name: Verify keystore
-        run: test -f starsea-release.jks && echo "keystore OK" || { echo "ERROR: keystore not found"; exit 1; }
+        run: |
+          test -f starsea-release.jks && echo "keystore OK" || { echo "ERROR: keystore not found"; exit 1; }
 
       - name: Build
         run: |
