@@ -78,9 +78,9 @@ jobs:
           VERSION_CODE=$(grep versionCode app/build.gradle.kts | head -1 | sed 's/.*= //')
           BUILD_TAG="${VERSION}.${VERSION_CODE}_$(date +%Y%m%d_%H%M%S)"
           cp "$APK_PATH" "Starsea_${BUILD_TAG}.apk"
-          # gopeed .so
+          # gopeed .so → 改名 .zip 上传（蓝奏云不支持 .so 后缀）
           SO_FILE=$(find app/src/main/jniLibs -name 'libgojni.so' 2>/dev/null | head -1)
-          if [ -n "$SO_FILE" ]; then cp "$SO_FILE" "libgojni_${BUILD_TAG}.so" 2>/dev/null; fi
+          if [ -n "$SO_FILE" ]; then cp "$SO_FILE" "libgojni_${BUILD_TAG}.zip" 2>/dev/null; fi
           # 压缩日志
           tar czf "build_log_${BUILD_TAG}.tar.gz" /tmp/build.log app/build/reports/ app/build/outputs/logs/ 2>/dev/null || true
           echo "BUILD_TAG=$BUILD_TAG" >> $GITHUB_ENV
@@ -100,8 +100,8 @@ jobs:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
-          if [ -f "libgojni_${{ env.BUILD_TAG }}.so" ]; then
-            python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.so" "libgojni_${{ env.BUILD_TAG }}.so" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          if [ -f "libgojni_${{ env.BUILD_TAG }}.zip" ]; then
+            python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.zip" "libgojni_${{ env.BUILD_TAG }}.zip" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
           fi
 
       - name: Upload build log to Lanzou (logs folder)
