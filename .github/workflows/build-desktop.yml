@@ -234,13 +234,24 @@ jobs:
           call gradlew.bat :desktop-app:packageUberJarForCurrentOS --no-daemon --console=plain
           dir desktop-app\build\compose\jars
 
+          REM 动态定位 uber jar（名字含平台与版本，如 StarSea-windows-x64-1.0.0.jar）
+          cd desktop-app\build\compose\jars
+          for %%f in (StarSea-*.jar) do set UBER_JAR=%%f
+          cd ..\..\..\..
+          echo Using jar: %UBER_JAR%
+          if "%UBER_JAR%"=="" (
+            echo FATAL: uber jar not found
+            exit /b 1
+          )
+
           native-image.cmd ^
             -H:Name=StarSea ^
             -H:Path=native-build ^
             -H:+ReportUnsupportedElementsAtRuntime ^
+            -H:+TraceClassInitialization ^
             -J-Xmx6g ^
             --no-fallback ^
-            -jar desktop-app\build\compose\jars\StarSea-desktop-app-1.0.0.jar
+            -jar "desktop-app\build\compose\jars\%UBER_JAR%"
 
       - name: Upload native exe (if built)
         if: always()
@@ -249,4 +260,5 @@ jobs:
           name: StarSea-native-windows-experimental
           if-no-files-found: ignore
           path: |
+            native-build/*.exe
             desktop-app/native-build/*.exe
