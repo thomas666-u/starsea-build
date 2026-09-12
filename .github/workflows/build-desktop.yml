@@ -318,6 +318,10 @@ jobs:
             --no-fallback `
             com.stars.app.MainKt
 
+          # 打印产物清单（含 jvm.dll / lcms.dll 等同目录依赖，缺一不可）
+          Write-Host "===== native-build 产物清单 ====="
+          Get-ChildItem native-build | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+
       - name: Bundle gopeed CLI next to native exe
         shell: pwsh
         run: |
@@ -340,6 +344,10 @@ jobs:
         with:
           name: StarSea-native-windows-experimental
           if-no-files-found: ignore
+          # ★ 必须上传整个 native-build 目录：GraalVM 产物除 StarSea.exe 外，
+          #   还生成 jvm.dll(jdk_library_shim) / lcms.dll 等同目录依赖。
+          #   只传 *.exe 会导致用户运行时报
+          #   "awk not found in javapath"（exe 找不到 jvm.dll → 回退系统 PATH 找 Java）。
           path: |
-            native-build/*.exe
-            desktop-app/native-build/*.exe
+            native-build/**
+            desktop-app/native-build/**
