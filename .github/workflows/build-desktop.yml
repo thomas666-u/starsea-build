@@ -125,26 +125,32 @@ jobs:
           # 写成环境变量供打包后校核
           echo "JE_REL=$JE_REL" >> $GITHUB_ENV
 
-          # 用 tar 打包（Windows 10+ 自带 bsdtar）：相比 7z 更可靠地保留深层路径。
-          # ★ 坑：tar -f "D:\a\..." 会把 "D:" 当远程主机名 → 报 "Cannot connect to D:"。
-          #   解法：先在当前目录打包（相对路径），再 move 到目标位置。
+          # 用 zip -r 打包：Git Bash 自带，Windows 资源管理器兼容性最好，
+          # 且不像 tar 那样把 "D:" 误认成远程主机（tar -f D:\ 会报 Cannot connect to D:）。
           ZIP_NAME="StarSea_Win_Portable_$TAG.zip"
           ZIP_ABS="$PWD/$ZIP_NAME"
-          # 用 --force-local 让 tar 把带冒号的 Windows 路径当作本地文件
-          (cd desktop-app/build/jpackage-out && tar --force-local -a -c -f "$ZIP_ABS" StarSea)
-          ls -la "$ZIP_NAME"
+          rm -f "$ZIP_ABS"
+          (cd desktop-app/build/jpackage-out && zip -r -q "$ZIP_ABS" StarSea)
+          echo "打包完成: $(du -h "$ZIP_ABS" | cut -f1)"
 
           # 打包后校核：zip 内必须能查到 jvm.cfg（路径随平台）
           echo "===== zip 内容校核 ====="
-          if tar --force-local -tf "$ZIP_ABS" | grep -q "StarSea/$JE_REL/lib/jvm.cfg"; then
+          if unzip -l "$ZIP_ABS" | grep -q "StarSea/$JE_REL/lib/jvm.cfg"; then
             echo "zip 内含 jvm.cfg ✓ (StarSea/$JE_REL/lib/jvm.cfg)"
           else
             echo "::error::zip 内缺少 StarSea/$JE_REL/lib/jvm.cfg"
-            tar --force-local -tf "$ZIP_ABS" | wc -l
-            tar --force-local -tf "$ZIP_ABS" | grep -i "jvm.cfg" || true
+            unzip -l "$ZIP_ABS" | tail -5
+            unzip -l "$ZIP_ABS" | grep -i "jvm.cfg" || true
             exit 1
           fi
-          echo "zip 条目数: $(tar --force-local -tf "$ZIP_ABS" | wc -l)"
+          echo "zip 条目数: $(unzip -l "$ZIP_ABS" | tail -1)"
+          # zip 完整性校验（关键：防用户侧"zip 无效"）
+          if unzip -t "$ZIP_ABS" > /dev/null 2>&1; then
+            echo "zip 完整性校验通过 ✓"
+          else
+            echo "::error::zip 完整性校验失败（zip 已损坏）"
+            exit 1
+          fi
 
           # msi（Compose 插件路径，可能没有）
           if ls desktop-app/build/compose/binaries/main/msi/*.msi 1>/dev/null 2>&1; then
@@ -283,6 +289,10 @@ jobs:
           components: "native-image"
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # ⚠️ 已知限制：GraalVM native-image 不支持 Compose Desktop（Skiko 的 SkiaLayer
+      # 继承 java.awt.Component，51 处 AWT 引用）。运行时报
+      #   NoSuchMethodError: java.awt.Toolkit.getDefaultToolkit()
+      # 这是 Skiko/AWT 的底层依赖，无法通过配置绕过。本 job 保留为实验记录（continue-on-error）。
       - name: Build classpath then native image
         shell: pwsh
         run: |
