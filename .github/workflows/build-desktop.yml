@@ -274,6 +274,22 @@ jobs:
             --no-fallback `
             com.stars.app.MainKt
 
+      - name: Bundle gopeed CLI next to native exe
+        shell: pwsh
+        run: |
+          $exeDir = "native-build"
+          if (Test-Path "$exeDir\StarSea.exe") {
+            # 下载 gopeed CLI 放到 exe 并排目录（GopeedEngine 查找路径：自身 jar/exe 同目录 → app 目录 → PATH）
+            try {
+              Invoke-WebRequest -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/gopeed-cli/gopeed-cli-win-x64.exe" -OutFile "$exeDir\gopeed.exe" -ErrorAction Stop
+              Write-Host "gopeed.exe bundled: $((Get-Item "$exeDir\gopeed.exe").Length / 1MB)MB"
+            } catch {
+              Write-Host "::warning::gopeed CLI download failed: $_"
+            }
+          } else {
+            Write-Host "StarSea.exe not found, skipping gopeed bundle"
+          }
+
       - name: Upload native exe (if built)
         if: always()
         uses: actions/upload-artifact@v4
