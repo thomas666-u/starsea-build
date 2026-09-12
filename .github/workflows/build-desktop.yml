@@ -241,16 +241,19 @@ jobs:
           # 找 sqlite-jdbc feature 类（在 uber jar 内）
           $jarPath = "desktop-app\build\compose\jars\$jar"
 
-          # native-image：用 -cp + -jar 模式（jar Manifest 里的 Main-Class 自动识别）
-          # SQLite JDBC 自带 GraalVM feature：org.sqlite.nativeimage.SqliteJdbcFeature
+          # native-image：用 -cp 模式（不 -jar，让 feature 类可见）
+          # SQLite JNI 通过手动 jni-config.json 配置（不走 SqliteJdbcFeature，兼容性更好）
           native-image.cmd `
             -cp $jarPath `
             -H:Name=StarSea `
             -H:Path=native-build `
             -H:+ReportUnsupportedElementsAtRuntime `
-            --features=org.sqlite.nativeimage.SqliteJdbcFeature `
+            -H:JNIConfigurationFiles=desktop-app/src/jvmMain/resources/META-INF/native-image/jni-config.json `
+            -H:ResourceConfigurationFiles=desktop-app/src/jvmMain/resources/META-INF/native-image/resource-config.json `
+            -H:ReflectionConfigurationFiles=desktop-app/src/jvmMain/resources/META-INF/native-image/reflect-config.json `
             -J-Xmx6g `
             --no-fallback `
+            --initialize-at-build-time=org.sqlite,org.sqlite.core `
             com.stars.app.MainKt
 
       - name: Upload native exe (if built)
