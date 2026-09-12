@@ -125,22 +125,26 @@ jobs:
           # 写成环境变量供打包后校核
           echo "JE_REL=$JE_REL" >> $GITHUB_ENV
 
-          # 用 tar 打包（Windows 10+ 自带 bsdtar）：相比 7z 更可靠地保留
-          # 深层路径，避免解压后 JRE 结构错位
-          (cd desktop-app/build/jpackage-out && tar -a -c -f "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
+          # 用 tar 打包（Windows 10+ 自带 bsdtar）：相比 7z 更可靠地保留深层路径。
+          # ★ 坑：tar -f "D:\a\..." 会把 "D:" 当远程主机名 → 报 "Cannot connect to D:"。
+          #   解法：先在当前目录打包（相对路径），再 move 到目标位置。
+          ZIP_NAME="StarSea_Win_Portable_$TAG.zip"
+          ZIP_ABS="$PWD/$ZIP_NAME"
+          # 用 --force-local 让 tar 把带冒号的 Windows 路径当作本地文件
+          (cd desktop-app/build/jpackage-out && tar --force-local -a -c -f "$ZIP_ABS" StarSea)
+          ls -la "$ZIP_NAME"
 
           # 打包后校核：zip 内必须能查到 jvm.cfg（路径随平台）
           echo "===== zip 内容校核 ====="
-          if tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | grep -q "StarSea/$JE_REL/lib/jvm.cfg"; then
+          if tar --force-local -tf "$ZIP_ABS" | grep -q "StarSea/$JE_REL/lib/jvm.cfg"; then
             echo "zip 内含 jvm.cfg ✓ (StarSea/$JE_REL/lib/jvm.cfg)"
           else
             echo "::error::zip 内缺少 StarSea/$JE_REL/lib/jvm.cfg"
-            tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | wc -l
-            tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | grep -i "jvm.cfg" || true
+            tar --force-local -tf "$ZIP_ABS" | wc -l
+            tar --force-local -tf "$ZIP_ABS" | grep -i "jvm.cfg" || true
             exit 1
           fi
-          echo "zip 条目数: $(tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | wc -l)"
-          ls -la "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip"
+          echo "zip 条目数: $(tar --force-local -tf "$ZIP_ABS" | wc -l)"
 
           # msi（Compose 插件路径，可能没有）
           if ls desktop-app/build/compose/binaries/main/msi/*.msi 1>/dev/null 2>&1; then
