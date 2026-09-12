@@ -1,12 +1,7 @@
 name: Build Gopeed .so
 
 on:
-  workflow_dispatch:
-    inputs:
-      gopeed_ref:
-        description: "gopeed 上游 ref/commit（默认 cfdf87c）"
-        required: false
-        default: "cfdf87c3b8aad398290fac0f8989c1e4f8e4b60d"
+  workflow_dispatch: {}
 
 jobs:
   build:
@@ -18,7 +13,7 @@ jobs:
       SOURCE_REPO: thomas666-u/Starseatool
 
     steps:
-      - name: Checkout source repo (for patch + lanzou_upload.py)
+      - name: Checkout source repo (gopeed-src + lanzou_upload.py)
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
@@ -26,27 +21,12 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Checkout gopeed upstream
-        uses: actions/checkout@v4
-        with:
-          repository: GopeedLab/gopeed
-          ref: ${{ github.event.inputs.gopeed_ref }}
-          path: gopeed
-          fetch-depth: 0
-
-      - name: Apply custom patch
-        run: |
-          cd gopeed
-          git apply ../gopeed-patch/custom.patch
-          echo "Patch applied"
-          git diff --stat
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.26"
           cache: true
-          cache-dependency-path: gopeed/go.sum
+          cache-dependency-path: gopeed-src/go.sum
 
       - name: Install gomobile
         run: |
@@ -65,7 +45,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
 
       - name: Build .so via gomobile bind
-        working-directory: gopeed
+        working-directory: gopeed-src
         run: |
           go get golang.org/x/mobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
