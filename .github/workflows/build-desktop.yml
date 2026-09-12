@@ -100,30 +100,43 @@ jobs:
 
           # ★ 打包前自检：JRE 结构必须完整，否则解压后运行会报
           #   "cannot open runtime/lib/jvm.cfg"（jpackage app-image 缺 JRE 的典型症状）
+          # 注意：JRE 布局平台不同 ——
+          #   Windows jpackage: StarSea/runtime/lib/jvm.cfg（runtime 在顶层）
+          #   Linux   jpackage: StarSea/lib/runtime/lib/jvm.cfg（runtime 在 lib 下）
           echo "===== app-image 结构自检 ====="
-          if [ ! -f "$APP/lib/runtime/lib/jvm.cfg" ]; then
-            echo "::error::jvm.cfg 缺失于 $APP/lib/runtime/lib/jvm.cfg —— app-image 的 JRE 不完整"
-            echo "--- lib/ 内容 ---"; ls -la "$APP/lib" 2>/dev/null || echo "(lib 不存在)"
-            echo "--- lib/runtime/ 内容 ---"; ls -la "$APP/lib/runtime" 2>/dev/null || echo "(runtime 不存在)"
+          JE=""
+          for cand in "$APP/runtime/lib/jvm.cfg" "$APP/lib/runtime/lib/jvm.cfg"; do
+            if [ -f "$cand" ]; then JE="$cand"; break; fi
+          done
+          if [ -z "$JE" ]; then
+            echo "::error::jvm.cfg 缺失 —— app-image 的 JRE 不完整"
+            echo "--- 顶层 ---"; ls -la "$APP" 2>/dev/null
             echo "--- 全域搜索 jvm.cfg ---"; find "$APP" -name "jvm.cfg" 2>/dev/null || true
             exit 1
           fi
-          echo "jvm.cfg OK: $APP/lib/runtime/lib/jvm.cfg"
-          echo "runtime 目录条目数: $(find "$APP/lib/runtime" -type f 2>/dev/null | wc -l)"
+          echo "jvm.cfg OK: $JE"
+          # JRE 相对 app 根的路径（Windows: runtime；Linux: lib/runtime）
+          JE_ROOT=$(dirname "$(dirname "$JE")")
+          JE_REL=${JE_ROOT#"$APP"/}
+          echo "JRE 目录: $JE_REL"
+          echo "JRE 文件数: $(find "$JE_ROOT" -type f 2>/dev/null | wc -l)"
           echo "app-image 总文件数: $(find "$APP" -type f 2>/dev/null | wc -l)"
           echo "app-image 总大小: $(du -sh "$APP" 2>/dev/null | cut -f1)"
+          # 写成环境变量供打包后校核
+          echo "JE_REL=$JE_REL" >> $GITHUB_ENV
 
           # 用 tar 打包（Windows 10+ 自带 bsdtar）：相比 7z 更可靠地保留
-          # 深层路径与 JRE 的软链接/符号结构，避免解压后 lib/runtime 结构错位
+          # 深层路径，避免解压后 JRE 结构错位
           (cd desktop-app/build/jpackage-out && tar -a -c -f "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
 
-          # 打包后校核：zip 内必须能查到 jvm.cfg
+          # 打包后校核：zip 内必须能查到 jvm.cfg（路径随平台）
           echo "===== zip 内容校核 ====="
-          if tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | grep -q "StarSea/lib/runtime/lib/jvm.cfg"; then
-            echo "zip 内含 jvm.cfg ✓"
+          if tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | grep -q "StarSea/$JE_REL/lib/jvm.cfg"; then
+            echo "zip 内含 jvm.cfg ✓ (StarSea/$JE_REL/lib/jvm.cfg)"
           else
-            echo "::error::zip 内缺少 StarSea/lib/runtime/lib/jvm.cfg"
-            tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | head -30
+            echo "::error::zip 内缺少 StarSea/$JE_REL/lib/jvm.cfg"
+            tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | wc -l
+            tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | grep -i "jvm.cfg" || true
             exit 1
           fi
           echo "zip 条目数: $(tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | wc -l)"
