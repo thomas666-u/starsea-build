@@ -257,9 +257,10 @@ jobs:
           # native-image：完整 classpath（原始 jar 保留 MR-JAR，SqliteJdbcFeature 可被加载，
           # 同时 jar 内的 native-image.properties 会自动注册 feature 与资源配置）
           # Windows cmd 8191 字符限制 → classpath 写入 @argfile 传递
-          # 注意：Set-Content 写 CRLF 会污染参数（\r 混进 classpath 路径），
-          # 必须用 WriteAllText + 手动 LF
-          [System.IO.File]::WriteAllText("$PWD\cp-arg.txt", "-cp`n`"$cp`"", [System.Text.Encoding]::ASCII)
+          # 注意 1：Set-Content 写 CRLF 会污染参数 → 用 WriteAllText + LF
+          # 注意 2：Java argfile 解析器把 \b \r \n 当转义序列 → 反斜杠换成正斜杠
+          $cpFwd = $cp -replace '\\', '/'
+          [System.IO.File]::WriteAllText("$PWD\cp-arg.txt", "-cp`n`"$cpFwd`"", [System.Text.Encoding]::ASCII)
           Write-Host "cp-arg.txt written: $((Get-Item cp-arg.txt).Length) bytes"
           native-image.cmd `
             @cp-arg.txt `
