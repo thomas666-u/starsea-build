@@ -79,10 +79,12 @@ jobs:
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
           python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.zip" "libgojni_${{ env.BUILD_TAG }}.zip" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          echo "PROTECT_NAME=libgojni_${{ env.BUILD_TAG }}.zip" >> $GITHUB_ENV
 
-      - name: Cleanup old builds (keep 5)
+      - name: Cleanup old builds (keep 5, protect current)
         env:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
-          python3 scripts/lanzou_upload.py cleanup "Build" 5 "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          # 只清理 .so（libgojni_*.zip），保护本次上传的文件
+          python3 scripts/lanzou_upload.py cleanup "Build" 5 "--protect=${{ env.PROTECT_NAME }}" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true

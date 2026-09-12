@@ -94,6 +94,7 @@ jobs:
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
           python3 scripts/lanzou_upload.py upload-nolog "Starsea_${{ env.BUILD_TAG }}.apk" "Starsea_${{ env.BUILD_TAG }}.apk" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          echo "PROTECT_NAME=Starsea_${{ env.BUILD_TAG }}.apk" >> $GITHUB_ENV
 
       - name: Upload .so to Lanzou (Build folder)
         env:
@@ -102,6 +103,7 @@ jobs:
         run: |
           if [ -f "libgojni_${{ env.BUILD_TAG }}.zip" ]; then
             python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.zip" "libgojni_${{ env.BUILD_TAG }}.zip" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+            echo "PROTECT_NAME=$PROTECT_NAME,libgojni_${{ env.BUILD_TAG }}.zip" >> $GITHUB_ENV
           fi
 
       - name: Upload build log to Lanzou (logs folder)
@@ -111,12 +113,14 @@ jobs:
         run: |
           if [ -f "build_log_${{ env.BUILD_TAG }}.tar.gz" ]; then
             python3 scripts/lanzou_upload.py upload-nolog "build_log_${{ env.BUILD_TAG }}.tar.gz" "build_log_${{ env.BUILD_TAG }}.tar.gz" "logs" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+            echo "PROTECT_LOG=build_log_${{ env.BUILD_TAG }}.tar.gz" >> $GITHUB_ENV
           fi
 
-      - name: Cleanup old builds (keep 5)
+      - name: Cleanup old builds (keep 5, protect current)
         env:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
-          python3 scripts/lanzou_upload.py cleanup "Build" 5 "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
-          python3 scripts/lanzou_upload.py cleanup "logs" 5 "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          # ★ 传入本次上传的文件名做保护名单 —— 避免同分钟上传时排序不稳误删最新文件
+          python3 scripts/lanzou_upload.py cleanup "Build" 5 "--protect=${{ env.PROTECT_NAME }}" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          python3 scripts/lanzou_upload.py cleanup "logs" 5 "--protect=${{ env.PROTECT_LOG }}" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
