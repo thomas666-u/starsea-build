@@ -242,7 +242,6 @@ jobs:
             -H:Name=StarSea `
             -H:Path=native-build `
             -H:+ReportUnsupportedElementsAtRuntime `
-            -H:+TraceClassInitialization `
             -J-Xmx6g `
             --no-fallback `
             -jar "desktop-app\build\compose\jars\$jar"
