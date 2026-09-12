@@ -65,7 +65,28 @@ jobs:
           else
             echo "::warning::gopeed CLI 下载失败，本次不捆绑高速下载核心"
           fi
-          # 2) 用 JDK 自带 jpackage 直接打 app-image（不经 Compose 插件）
+
+          # 1.6) ★ jlink 裁剪 JRE：默认 jpackage 会塞全量 JDK（68 模块/136MB）。
+          #   jdeps 分析 uber jar 实际只需 5 个模块（java.base,java.desktop,java.instrument,
+          #   java.sql,jdk.unsupported），加上运行时隐性需求（logging/management/crypto.ec/
+          #   localedata 中文/naming/sql.rowset/java.net.http）共 11 个 → JRE ~40MB。
+          #   总包体积从 143MB 降到 ~65MB（含 gopeed 41MB）。
+          echo "===== jlink 定制 JRE ====="
+          JLINK_DIR=desktop-app/build/jlink-runtime
+          rm -rf "$JLINK_DIR"
+          "$JAVA_HOME/bin/jlink.exe" \
+            --add-modules java.base,java.desktop,java.instrument,java.sql,java.sql.rowset,java.logging,java.management,java.naming,java.net.http,jdk.unsupported,jdk.crypto.ec,jdk.localedata \
+            --strip-debug \
+            --no-man-pages \
+            --no-header-files \
+            --compress=2 \
+            --output "$JLINK_DIR" 2>&1 | tee -a /tmp/build.log
+          test -f "$JLINK_DIR/bin/java.exe" || {
+            echo "FATAL: jlink JRE 未生成"; exit 1; }
+          echo "jlink JRE OK: $(du -sh "$JLINK_DIR" | cut -f1)"
+
+          # 2) 用 JDK 自带 jpackage 直接打 app-image（不经 Compose 插件）；
+          #    --runtime-image 指向 jlink 裁剪的 JRE（关键：不传则 jpackage 打全量 JDK）
           rm -rf desktop-app/build/jpackage-out
           "$JAVA_HOME/bin/jpackage.exe" \
             --type app-image \
@@ -73,6 +94,7 @@ jobs:
             --input "$JAR_DIR" \
             --main-jar "$(basename "$JAR")" \
             --main-class com.stars.app.MainKt \
+            --runtime-image "$JLINK_DIR" \
             --dest desktop-app/build/jpackage-out \
             --win-console \
             --java-options "-Xmx512m" 2>&1 | tee -a /tmp/build.log
@@ -80,7 +102,7 @@ jobs:
           echo "jpackage exit: $JP_EXIT"
           test -d "desktop-app/build/jpackage-out/StarSea" || {
             echo "FATAL: app-image 未生成"; exit 1; }
-          echo "app-image OK"
+          echo "app-image OK ($(du -sh desktop-app/build/jpackage-out/StarSea | cut -f1))"
 
       - name: Build msi (尽力而为，失败不阻断)
         shell: bash
