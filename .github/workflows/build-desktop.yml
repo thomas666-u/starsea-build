@@ -96,12 +96,43 @@ jobs:
         shell: bash
         run: |
           TAG=$(date +%Y%m%d_%H%M%S)
+          APP=desktop-app/build/jpackage-out/StarSea
+
+          # ★ 打包前自检：JRE 结构必须完整，否则解压后运行会报
+          #   "cannot open runtime/lib/jvm.cfg"（jpackage app-image 缺 JRE 的典型症状）
+          echo "===== app-image 结构自检 ====="
+          if [ ! -f "$APP/lib/runtime/lib/jvm.cfg" ]; then
+            echo "::error::jvm.cfg 缺失于 $APP/lib/runtime/lib/jvm.cfg —— app-image 的 JRE 不完整"
+            echo "--- lib/ 内容 ---"; ls -la "$APP/lib" 2>/dev/null || echo "(lib 不存在)"
+            echo "--- lib/runtime/ 内容 ---"; ls -la "$APP/lib/runtime" 2>/dev/null || echo "(runtime 不存在)"
+            echo "--- 全域搜索 jvm.cfg ---"; find "$APP" -name "jvm.cfg" 2>/dev/null || true
+            exit 1
+          fi
+          echo "jvm.cfg OK: $APP/lib/runtime/lib/jvm.cfg"
+          echo "runtime 目录条目数: $(find "$APP/lib/runtime" -type f 2>/dev/null | wc -l)"
+          echo "app-image 总文件数: $(find "$APP" -type f 2>/dev/null | wc -l)"
+          echo "app-image 总大小: $(du -sh "$APP" 2>/dev/null | cut -f1)"
+
+          # 用 tar 打包（Windows 10+ 自带 bsdtar）：相比 7z 更可靠地保留
+          # 深层路径与 JRE 的软链接/符号结构，避免解压后 lib/runtime 结构错位
+          (cd desktop-app/build/jpackage-out && tar -a -c -f "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
+
+          # 打包后校核：zip 内必须能查到 jvm.cfg
+          echo "===== zip 内容校核 ====="
+          if tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | grep -q "StarSea/lib/runtime/lib/jvm.cfg"; then
+            echo "zip 内含 jvm.cfg ✓"
+          else
+            echo "::error::zip 内缺少 StarSea/lib/runtime/lib/jvm.cfg"
+            tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | head -30
+            exit 1
+          fi
+          echo "zip 条目数: $(tar -tf "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" | wc -l)"
+          ls -la "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip"
+
           # msi（Compose 插件路径，可能没有）
           if ls desktop-app/build/compose/binaries/main/msi/*.msi 1>/dev/null 2>&1; then
             cp desktop-app/build/compose/binaries/main/msi/*.msi "StarSea_Win_MSI_$TAG.msi"
           fi
-          # 便携版 zip（必产物，来自原生 jpackage 的 app-image）
-          (cd desktop-app/build/jpackage-out && 7z a -tzip "$GITHUB_WORKSPACE/StarSea_Win_Portable_$TAG.zip" StarSea)
           tar czf "build_log_win_$TAG.tar.gz" /tmp/build.log 2>/dev/null || true
           echo "BUILD_TAG=$TAG" >> $GITHUB_ENV
           ls -la *.msi *.zip 2>/dev/null || true
