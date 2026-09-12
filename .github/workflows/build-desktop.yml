@@ -213,7 +213,7 @@ jobs:
         run: |
           TAG=${{ env.BUILD_TAG }}
           for f in "StarSea_Win_MSI_$TAG.msi" "StarSea_Win_Portable_$TAG.zip"; do
-            [ -f "$f" ] && python3 scripts/lanzou_upload.py upload-nolog "$f" "$f" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+            [ -f "$f" ] && timeout 1500 python3 scripts/lanzou_upload.py upload-nolog "$f" "$f" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || echo "::warning::蓝奏云上传超时/失败（$f），产物已在 GitHub artifacts" 
           done
 
       - name: Upload build log to Lanzou (logs folder)
