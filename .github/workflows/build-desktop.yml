@@ -43,7 +43,7 @@ jobs:
           key: gradle-desktop-win-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-desktop-win-
 
-- name: Build app-image (必产物：uber jar + 原生 jpackage，绕开 Compose 打包层)
+      - name: Build app-image (必产物：uber jar + 原生 jpackage，绕开 Compose 打包层)
         shell: bash
         run: |
           set -x
