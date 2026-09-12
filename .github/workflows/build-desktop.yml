@@ -341,7 +341,7 @@ jobs:
             -J-Xmx6g `
             --no-fallback `
             -H:+UseCompressedReferences `
-            --initialize-at-run-time=java.awt.Toolkit,java.awt.GraphicsEnvironment,org.jetbrains.skiko.SkiaLayer `
+            --initialize-at-run-time=java.awt.Toolkit,java.awt.GraphicsEnvironment,java.awt.SystemColor,java.awt.Event,java.awt.Insets,java.awt.Font,java.awt.datatransfer.SystemFlavorMap,sun.awt.windows.WToolkit,sun.awt.Win32GraphicsEnvironment,sun.java2d.SunGraphicsEnvironment,org.jetbrains.skiko.SkiaLayer `
             com.stars.app.MainKt
 
           # 打印产物清单（含 jvm.dll / lcms.dll 等同目录依赖，缺一不可）
