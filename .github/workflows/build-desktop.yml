@@ -147,32 +147,19 @@ jobs:
           # 写成环境变量供打包后校核
           echo "JE_REL=$JE_REL" >> $GITHUB_ENV
 
-          # 用 zip -r 打包：Git Bash 自带，Windows 资源管理器兼容性最好，
-          # 且不像 tar 那样把 "D:" 误认成远程主机（tar -f D:\ 会报 Cannot connect to D:）。
+          # ★ 打包：Python zipfile（跨平台 100% 可靠）。
+          #   MSYS zip -r 带反斜杠绝对路径会产出 268MB 垃圾头的坏 zip；
+          #   bsdtar -a 产出的 zip 用户侧报无效。Python zipfile 无任何怪癖。
+          #   脚本内置 testzip 完整性校验 + jvm.cfg 存在性校验。
           ZIP_NAME="StarSea_Win_Portable_$TAG.zip"
+          python3 scripts/zip_app.py desktop-app/build/jpackage-out/StarSea "$PWD/$ZIP_NAME"
           ZIP_ABS="$PWD/$ZIP_NAME"
-          rm -f "$ZIP_ABS"
-          (cd desktop-app/build/jpackage-out && zip -r -q "$ZIP_ABS" StarSea)
-          echo "打包完成: $(du -h "$ZIP_ABS" | cut -f1)"
 
-          # 打包后校核：zip 内必须能查到 jvm.cfg（路径随平台）
-          echo "===== zip 内容校核 ====="
-          if unzip -l "$ZIP_ABS" | grep -q "StarSea/$JE_REL/lib/jvm.cfg"; then
-            echo "zip 内含 jvm.cfg ✓ (StarSea/$JE_REL/lib/jvm.cfg)"
-          else
-            echo "::error::zip 内缺少 StarSea/$JE_REL/lib/jvm.cfg"
-            unzip -l "$ZIP_ABS" | tail -5
-            unzip -l "$ZIP_ABS" | grep -i "jvm.cfg" || true
-            exit 1
-          fi
-          echo "zip 条目数: $(unzip -l "$ZIP_ABS" | tail -1)"
-          # zip 完整性校验（关键：防用户侧"zip 无效"）
-          if unzip -t "$ZIP_ABS" > /dev/null 2>&1; then
-            echo "zip 完整性校验通过 ✓"
-          else
-            echo "::error::zip 完整性校验失败（zip 已损坏）"
-            exit 1
-          fi
+          # zip_app.py 已内置完整性 + jvm.cfg 校验；这里再独立复核一次（双保险）
+          echo "===== zip 独立复核 ====="
+          unzip -l "$ZIP_ABS" | grep -q "jvm.cfg" || { echo "::error::独立复核失败"; exit 1; }
+          unzip -t "$ZIP_ABS" > /dev/null 2>&1 || { echo "::error::zip 已损坏"; exit 1; }
+          echo "zip 独立复核通过 ✓ 大小: $(du -h "$ZIP_ABS" | cut -f1)"
 
           # msi（Compose 插件路径，可能没有）
           if ls desktop-app/build/compose/binaries/main/msi/*.msi 1>/dev/null 2>&1; then
