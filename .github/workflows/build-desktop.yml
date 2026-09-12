@@ -43,7 +43,7 @@ jobs:
           key: gradle-desktop-win-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-desktop-win-
 
-      - name: Build app-image (必产物：uber jar + 原生 jpackage，绕开 Compose 打包层)
+- name: Build app-image (必产物：uber jar + 原生 jpackage，绕开 Compose 打包层)
         shell: bash
         run: |
           set -x
@@ -55,10 +55,17 @@ jobs:
             echo "FATAL: uber jar 未生成"; ls desktop-app/build/compose/jars/ 2>/dev/null; exit 1
           fi
           echo "uber jar OK: $JAR"
-
-          # 2) 用 JDK 自带 jpackage 直接打 app-image（不经 Compose 插件）
-          #    --input 指 jars 目录（uber jar 就在这里）
           JAR_DIR=$(dirname "$JAR")
+          # 1.5) 下载 gopeed CLI 放进 --input 目录（jpackage 会拷入 StarSea/app/，
+          #      GopeedEngine 从自身 jar 所在目录查找 = StarSea/app/gopeed.exe）
+          if curl -sL --retry 3 -o "$JAR_DIR/gopeed.exe" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/gopeed-cli/gopeed-cli-win-x64.exe" \
+            && [ -s "$JAR_DIR/gopeed.exe" ]; then
+            echo "gopeed.exe bundled: $(du -h "$JAR_DIR/gopeed.exe" | cut -f1)"
+          else
+            echo "::warning::gopeed CLI 下载失败，本次不捆绑高速下载核心"
+          fi
+          # 2) 用 JDK 自带 jpackage 直接打 app-image（不经 Compose 插件）
           rm -rf desktop-app/build/jpackage-out
           "$JAVA_HOME/bin/jpackage.exe" \
             --type app-image \
@@ -249,8 +256,10 @@ jobs:
 
           # native-image：完整 classpath（原始 jar 保留 MR-JAR，SqliteJdbcFeature 可被加载，
           # 同时 jar 内的 native-image.properties 会自动注册 feature 与资源配置）
+          # Windows cmd 8191 字符限制 → classpath 写入 @argfile 传递（argfile 内每行一个参数）
+          "-cp", "`"$cp`"" | Set-Content -Encoding ascii cp-arg.txt
           native-image.cmd `
-            -cp $cp `
+            @cp-arg.txt `
             -H:Name=StarSea `
             -H:Path=native-build `
             -H:+ReportUnsupportedElementsAtRuntime `
