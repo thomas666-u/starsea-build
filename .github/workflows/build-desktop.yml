@@ -303,11 +303,12 @@ jobs:
           ref: ${{ github.event.inputs.source_ref }}
           fetch-depth: 1
 
-      - name: Set up GraalVM
+      - name: Set up GraalVM (JDK 21 —— Windows AWT headful 支持的最低要求版本)
         uses: graalvm/setup-graalvm@v1
         with:
-          version: "latest"
-          java-version: "17"
+          version: "21"
+          java-version: "21"
+          distribution: "graalvm"
           components: "native-image"
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -352,6 +353,8 @@ jobs:
             -H:ReflectionConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\reflect-config.json `
             -J-Xmx6g `
             --no-fallback `
+            -H:+UseCompressedReferences `
+            --initialize-at-run-time=java.awt.Toolkit,java.awt.GraphicsEnvironment,org.jetbrains.skiko.SkiaLayer `
             com.stars.app.MainKt
 
           # 打印产物清单（含 jvm.dll / lcms.dll 等同目录依赖，缺一不可）
