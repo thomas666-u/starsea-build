@@ -228,32 +228,37 @@ jobs:
           components: "native-image"
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build uber jar then native image
+      - name: Build classpath then native image
         shell: pwsh
         run: |
-          .\gradlew.bat :desktop-app:packageUberJarForCurrentOS --no-daemon --console=plain
-          Get-ChildItem desktop-app\build\compose\jars\StarSea-*.jar
+          # 1) 编译到 classes（不出 fat jar），2) 用 runtimeClasspath 原始 jar 列表做 -cp
+          .\gradlew.bat :desktop-app:compileKotlin :desktop-app:printRuntimeClasspath --no-daemon --console=plain > gradle-out.txt 2>&1
+          if ($LASTEXITCODE -ne 0) { Get-Content gradle-out.txt | Select-Object -Last 60; exit 1 }
 
-          $jar = (Get-ChildItem desktop-app\build\compose\jars\StarSea-*.jar | Select-Object -First 1).Name
-          Write-Host "Using jar: $jar"
-          if (-not $jar) { Write-Host "FATAL: uber jar not found"; exit 1 }
+          # 从 gradle 输出提取 classpath 行（printRuntimeClasspath 任务输出的绝对路径）
+          $cpLines = Select-String -Path gradle-out.txt -Pattern '^([A-Za-z]:[\\/].+\.jar)$' -AllMatches |
+            ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -Unique
+          Write-Host "Found $($cpLines.Count) classpath jars"
 
-          # 找 sqlite-jdbc feature 类（在 uber jar 内）
-          $jarPath = "desktop-app\build\compose\jars\$jar"
+          # 应用 classes 目录 + 资源目录（含 META-INF/native-image 配置）
+          $classesDir = "desktop-app\build\classes\kotlin\main"
+          $resourcesDir = "desktop-app\build\resources\main"
+          $cp = (@($classesDir, $resourcesDir) + $cpLines) -join ';'
+          Write-Host "CP length: $($cp.Length)"
+          $cp | Out-File -Encoding ascii cp.txt
 
-          # native-image：用 -cp 模式（不 -jar，让 feature 类可见）
-          # SQLite JNI 通过手动 jni-config.json 配置（不走 SqliteJdbcFeature，兼容性更好）
+          # native-image：完整 classpath（原始 jar 保留 MR-JAR，SqliteJdbcFeature 可被加载，
+          # 同时 jar 内的 native-image.properties 会自动注册 feature 与资源配置）
           native-image.cmd `
-            -cp $jarPath `
+            -cp $cp `
             -H:Name=StarSea `
             -H:Path=native-build `
             -H:+ReportUnsupportedElementsAtRuntime `
-            -H:JNIConfigurationFiles=desktop-app/src/jvmMain/resources/META-INF/native-image/jni-config.json `
-            -H:ResourceConfigurationFiles=desktop-app/src/jvmMain/resources/META-INF/native-image/resource-config.json `
-            -H:ReflectionConfigurationFiles=desktop-app/src/jvmMain/resources/META-INF/native-image/reflect-config.json `
+            -H:JNIConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\jni-config.json `
+            -H:ResourceConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\resource-config.json `
+            -H:ReflectionConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\reflect-config.json `
             -J-Xmx6g `
             --no-fallback `
-            --initialize-at-build-time=org.sqlite,org.sqlite.core `
             com.stars.app.MainKt
 
       - name: Upload native exe (if built)
