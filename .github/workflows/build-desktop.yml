@@ -330,8 +330,15 @@ jobs:
           $cpFwd = $cp -replace '\\', '/'
           [System.IO.File]::WriteAllText("$PWD\cp-arg.txt", "-cp`n`"$cpFwd`"", [System.Text.Encoding]::ASCII)
           Write-Host "cp-arg.txt written: $((Get-Item cp-arg.txt).Length) bytes"
+          # ★ --initialize-at-run-time 列表很长（900+ 字符），直接放命令行会
+          #   在 PowerShell→CMD→JVM 多层转义中丢参数（报 Please specify class）。
+          #   与 classpath 同法：写入 argfile，绕开命令行长度/转义限制。
+          $initClasses = "java.awt.Toolkit,java.awt.GraphicsEnvironment,java.awt.SystemColor,java.awt.Event,java.awt.Insets,java.awt.Font,java.awt.datatransfer.SystemFlavorMap,sun.awt.windows.WToolkit,sun.awt.Win32GraphicsEnvironment,sun.java2d.SunGraphicsEnvironment,sun.java2d.SurfaceData,sun.java2d.windows.GDIWindowSurfaceData,sun.java2d.windows.WindowsSurfaceData,sun.java2d.loops.GraphicsPrimitive,sun.java2d.pipe.RenderBuffer,sun.java2d.windows.GDIRenderer,sun.java2d.d3d.D3DSurfaceData,sun.java2d.opengl.OGLSurfaceData,java.awt.image.ColorModel,java.awt.image.Raster,sun.awt.image.SunVolatileImage,org.jetbrains.skiko.SkiaLayer,com.sun.net.httpserver.HttpServer,com.sun.net.httpserver.HttpContext,sun.net.httpserver.ServerImpl,sun.net.httpserver.HttpServerImpl"
+          [System.IO.File]::WriteAllText("$PWD\init-arg.txt", "--initialize-at-run-time=$initClasses", [System.Text.Encoding]::ASCII)
+          Write-Host "init-arg.txt written: $((Get-Item init-arg.txt).Length) bytes"
           native-image.cmd `
             @cp-arg.txt `
+            @init-arg.txt `
             -H:Name=StarSea `
             -H:Path=native-build `
             -H:+ReportUnsupportedElementsAtRuntime `
@@ -341,7 +348,6 @@ jobs:
             -J-Xmx6g `
             --no-fallback `
             -H:+UseCompressedReferences `
-            --initialize-at-run-time=java.awt.Toolkit,java.awt.GraphicsEnvironment,java.awt.SystemColor,java.awt.Event,java.awt.Insets,java.awt.Font,java.awt.datatransfer.SystemFlavorMap,sun.awt.windows.WToolkit,sun.awt.Win32GraphicsEnvironment,sun.java2d.SunGraphicsEnvironment,sun.java2d.SurfaceData,sun.java2d.windows.GDIWindowSurfaceData,sun.java2d.windows.WindowsSurfaceData,sun.java2d.loops.GraphicsPrimitive,sun.java2d.pipe.RenderBuffer,sun.java2d.windows.GDIRenderer,sun.java2d.d3d.D3DSurfaceData,sun.java2d.opengl.OGLSurfaceData,java.awt.image.ColorModel,java.awt.image.Raster,sun.awt.image.SunVolatileImage,org.jetbrains.skiko.SkiaLayer,com.sun.net.httpserver.HttpServer,com.sun.net.httpserver.HttpContext,sun.net.httpserver.ServerImpl,sun.net.httpserver.HttpServerImpl`
             com.stars.app.MainKt
 
           # 打印产物清单（含 jvm.dll / lcms.dll 等同目录依赖，缺一不可）
