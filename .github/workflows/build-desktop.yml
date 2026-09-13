@@ -338,7 +338,7 @@ jobs:
             -H:JNIConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\jni-config.json `
             -H:ResourceConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\resource-config.json `
             -H:ReflectionConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\reflect-config.json `
-            --add-modules=jdk.httpserver `
+            "-J--add-modules=jdk.httpserver" `
             -J-Xmx6g `
             --no-fallback `
             -H:+UseCompressedReferences `
