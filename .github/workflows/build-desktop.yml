@@ -75,7 +75,7 @@ jobs:
           JLINK_DIR=desktop-app/build/jlink-runtime
           rm -rf "$JLINK_DIR"
           "$JAVA_HOME/bin/jlink.exe" \
-            --add-modules java.base,java.desktop,java.instrument,java.sql,java.sql.rowset,java.logging,java.management,java.naming,java.net.http,jdk.unsupported,jdk.crypto.ec,jdk.localedata \
+            --add-modules java.base,java.desktop,java.instrument,java.sql,java.sql.rowset,java.logging,java.management,java.naming,java.net.http,java.security.jgss,jdk.unsupported,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.localedata,jdk.httpserver \
             --strip-debug \
             --no-man-pages \
             --no-header-files \
@@ -338,10 +338,11 @@ jobs:
             -H:JNIConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\jni-config.json `
             -H:ResourceConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\resource-config.json `
             -H:ReflectionConfigurationFiles=desktop-app\src\jvmMain\resources\META-INF\native-image\reflect-config.json `
+            -J--add-modules=jdk.httpserver `
             -J-Xmx6g `
             --no-fallback `
             -H:+UseCompressedReferences `
-            --initialize-at-run-time=java.awt.Toolkit,java.awt.GraphicsEnvironment,java.awt.SystemColor,java.awt.Event,java.awt.Insets,java.awt.Font,java.awt.datatransfer.SystemFlavorMap,sun.awt.windows.WToolkit,sun.awt.Win32GraphicsEnvironment,sun.java2d.SunGraphicsEnvironment,org.jetbrains.skiko.SkiaLayer `
+            --initialize-at-run-time=java.awt.Toolkit,java.awt.GraphicsEnvironment,java.awt.SystemColor,java.awt.Event,java.awt.Insets,java.awt.Font,java.awt.datatransfer.SystemFlavorMap,sun.awt.windows.WToolkit,sun.awt.Win32GraphicsEnvironment,sun.java2d.SunGraphicsEnvironment,sun.java2d.SurfaceData,sun.java2d.windows.GDIWindowSurfaceData,sun.java2d.windows.WindowsSurfaceData,sun.java2d.loops.GraphicsPrimitive,sun.java2d.pipe.RenderBuffer,sun.java2d.windows.GDIRenderer,sun.java2d.d3d.D3DSurfaceData,sun.java2d.opengl.OGLSurfaceData,java.awt.image.ColorModel,java.awt.image.Raster,sun.awt.image.SunVolatileImage,org.jetbrains.skiko.SkiaLayer,com.sun.net.httpserver.HttpServer,com.sun.net.httpserver.HttpContext,sun.net.httpserver.ServerImpl,sun.net.httpserver.HttpServerImpl`
             com.stars.app.MainKt
 
           # 打印产物清单（含 jvm.dll / lcms.dll 等同目录依赖，缺一不可）
