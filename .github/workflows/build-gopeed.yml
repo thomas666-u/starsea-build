@@ -1,19 +1,19 @@
+# Build gopeed libgojni.so (android/arm64)
+# Source checked out from thomas666-u/Starseatool (gopeed-src/ directory)
 name: Build Gopeed .so
-
 on:
   workflow_dispatch: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.0.12077973
       SOURCE_REPO: thomas666-u/Starseatool
-
     steps:
-      - name: Checkout source repo (gopeed-src + lanzou_upload.py)
+      - name: Checkout source repo
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
@@ -44,17 +44,48 @@ jobs:
           echo "NDK: $ANDROID_NDK_HOME"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
 
+      - name: NDK ready check
+        run: echo "NDK_HOME=$ANDROID_NDK_HOME"
+
+      - name: Run core test suites (gate)
+        working-directory: gopeed-src
+        run: |
+          echo "=== go vet ==="
+          go vet ./internal/guard/ ./internal/protocol/http/ ./internal/httpclient/ ./pkg/download/ || exit 1
+          echo "=== guard tests ==="
+          go test ./internal/guard/ -count=1 -timeout 120s || exit 1
+          echo "=== httpclient tests ==="
+          go test ./internal/httpclient/ -count=1 -timeout 120s || exit 1
+          echo "=== http protocol tests ==="
+          go test ./internal/protocol/http/ -count=1 -timeout 600s || exit 1
+          echo "=== downloader tests ==="
+          go test ./pkg/download/ -count=1 -timeout 1200s || exit 1
+          echo "ALL TESTS PASSED"
+
       - name: Build .so via gomobile bind
         working-directory: gopeed-src
+        env:
+          GUARD_KEYS_LD: ${{ secrets.GUARD_KEYS_LD }}
         run: |
           go get golang.org/x/mobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
-          gomobile bind \
-            -target=android/arm64 \
-            -androidapi 23 \
-            -ldflags=-checklinkname=0 \
-            -o ../libgopeed.aar \
-            ./bind/mobile
+          if [ -n "$GUARD_KEYS_LD" ]; then
+            echo "guard keys injected via ldflags (kid: $(echo "$GUARD_KEYS_LD" | cut -d: -f1))"
+            gomobile bind \
+              -target=android/arm64 \
+              -androidapi 23 \
+              -ldflags="-checklinkname=0 -X 'github.com/GopeedLab/gopeed/internal/guard.GuardKeysLD=$GUARD_KEYS_LD'" \
+              -o ../libgopeed.aar \
+              ./bind/mobile
+          else
+            echo "Using fallbackKeysLD constant (keys_gen.go) — armed build"
+            gomobile bind \
+              -target=android/arm64 \
+              -androidapi 23 \
+              -ldflags=-checklinkname=0 \
+              -o ../libgopeed.aar \
+              ./bind/mobile
+          fi
 
       - name: Extract and strip .so
         run: |
@@ -86,5 +117,4 @@ jobs:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
-          # 只清理 .so（libgojni_*.zip），保护本次上传的文件
           python3 scripts/lanzou_upload.py cleanup "Build" 5 "--protect=${{ env.PROTECT_NAME }}" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
