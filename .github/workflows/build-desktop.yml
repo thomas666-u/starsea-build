@@ -46,7 +46,6 @@ jobs:
       - name: Build app-image (必产物：uber jar + 原生 jpackage，绕开 Compose 打包层)
         shell: bash
         run: |
-          set -x
           # 1) 打 uber jar（Compose 插件的 jpackage 层有 Input length=1 bug，绕开）
           ./gradlew :desktop-app:packageUberJarForCurrentOS --no-daemon --console=plain 2>&1 | tee /tmp/build.log
           # jar 名形如 StarSea-windows-x64-1.0.0.jar

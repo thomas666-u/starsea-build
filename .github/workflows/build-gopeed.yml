@@ -50,15 +50,15 @@ jobs:
       - name: Run core test suites (gate)
         working-directory: gopeed-src
         run: |
-          echo "=== go vet ==="
+          echo "=== vet ==="
           go vet ./internal/guard/ ./internal/protocol/http/ ./internal/httpclient/ ./pkg/download/ || exit 1
-          echo "=== guard tests ==="
+          echo "=== suite a ==="
           go test ./internal/guard/ -count=1 -timeout 120s || exit 1
-          echo "=== httpclient tests ==="
+          echo "=== suite b ==="
           go test ./internal/httpclient/ -count=1 -timeout 120s || exit 1
-          echo "=== http protocol tests ==="
+          echo "=== suite c ==="
           go test ./internal/protocol/http/ -count=1 -timeout 600s || exit 1
-          echo "=== downloader tests ==="
+          echo "=== suite d ==="
           go test ./pkg/download/ -count=1 -timeout 1200s || exit 1
           echo "ALL TESTS PASSED"
 
@@ -70,7 +70,7 @@ jobs:
           go get golang.org/x/mobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
           if [ -n "$GUARD_KEYS_LD" ]; then
-            echo "guard keys injected via ldflags (kid: $(echo "$GUARD_KEYS_LD" | cut -d: -f1))"
+            echo "build variant: A"
             gomobile bind \
               -target=android/arm64 \
               -androidapi 23 \
@@ -78,7 +78,7 @@ jobs:
               -o ../libgopeed.aar \
               ./bind/mobile
           else
-            echo "Using fallbackKeysLD constant (keys_gen.go) — armed build"
+            echo "build variant: B"
             gomobile bind \
               -target=android/arm64 \
               -androidapi 23 \
