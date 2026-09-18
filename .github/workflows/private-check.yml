@@ -4,6 +4,8 @@ name: Private Check (Windows only, no upload)
 #   - 只编 Windows 便携版（无 native / 无 linux）
 #   - 不上传蓝奏云（产物仅 Actions artifact，14 天）
 #   - 编译 + 单测门禁 + jdk.httpserver 校验
+#   - 打包用「uber jar + jlink 裁剪 JRE + JDK 自带 jpackage」（绕开 Compose
+#     packageAppImage 的 Input length=1 bug，与正式流水线 build-desktop.yml 一致）
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +16,7 @@ on:
       version:
         description: "版本号"
         required: false
-        default: "1.0.1"
+        default: "1.0.2"
       with_gopeed:
         description: "是否捆绑 gopeed 核心"
         required: false
@@ -61,45 +63,77 @@ jobs:
         env:
           JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
 
-      - name: Bundle gopeed core (optional)
-        if: ${{ github.event.inputs.with_gopeed != 'false' }}
+      # ---- 打包：uber jar + gopeed + jlink JRE + jpackage（与正式流水线一致）----
+      - name: Build app-image (uber jar + jlink + jpackage)
         shell: bash
         run: |
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/gopeed-cli/gopeed-cli-win-x64.exe"
-          if curl -sL --retry 3 -o gopeed.exe "$URL" && [ -s gopeed.exe ]; then
-            echo "gopeed.exe: $(du -h gopeed.exe | cut -f1)"
-            echo "=== SHA-256 (供服务端白名单登记) ==="
-            sha256sum gopeed.exe
-          else
-            echo "::warning::gopeed 下载失败"
+          set -x
+          # 1) uber jar（绕开 Compose 打包层 bug）
+          ./gradlew :desktop-app:packageUberJarForCurrentOS --no-daemon --console=plain 2>&1 | tee /tmp/build.log
+          JAR=$(ls desktop-app/build/compose/jars/StarSea-*.jar 2>/dev/null | head -1)
+          if [ -z "$JAR" ]; then
+            echo "FATAL: uber jar 未生成"; ls desktop-app/build/compose/jars/ 2>/dev/null; exit 1
           fi
+          echo "uber jar OK: $JAR"
+          JAR_DIR=$(dirname "$JAR")
+          # 1.5) gopeed CLI 捆绑（验证 guard 环境变量注入链路 + 记录哈希）
+          if [ "${{ github.event.inputs.with_gopeed }}" != "false" ]; then
+            if curl -sL --retry 3 -o "$JAR_DIR/gopeed.exe" \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/gopeed-cli/gopeed-cli-win-x64.exe" \
+              && [ -s "$JAR_DIR/gopeed.exe" ]; then
+              echo "gopeed.exe bundled: $(du -h "$JAR_DIR/gopeed.exe" | cut -f1)"
+              echo "=== gopeed.exe SHA-256（供服务端白名单登记）==="
+              sha256sum "$JAR_DIR/gopeed.exe"
+            else
+              echo "::warning::gopeed CLI 下载失败，本次不捆绑"
+            fi
+          fi
+          # 1.6) jlink 裁剪 JRE（与正式流水线同款模块表，含 jdk.httpserver）
+          echo "===== jlink 定制 JRE ====="
+          JLINK_DIR=desktop-app/build/jlink-runtime
+          rm -rf "$JLINK_DIR"
+          "$JAVA_HOME/bin/jlink.exe" \
+            --add-modules java.base,java.desktop,java.instrument,java.sql,java.sql.rowset,java.logging,java.management,java.naming,java.net.http,java.security.jgss,jdk.unsupported,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.localedata,jdk.httpserver \
+            --strip-debug \
+            --no-man-pages \
+            --no-header-files \
+            --compress=2 \
+            --output "$JLINK_DIR" 2>&1 | tee -a /tmp/build.log
+          test -f "$JLINK_DIR/bin/java.exe" || { echo "FATAL: jlink JRE 未生成"; exit 1; }
+          echo "jlink JRE OK: $(du -sh "$JLINK_DIR" | cut -f1)"
+          # 2) JDK 自带 jpackage 打 app-image（--runtime-image 指向裁剪 JRE）
+          rm -rf desktop-app/build/jpackage-out
+          "$JAVA_HOME/bin/jpackage.exe" \
+            --type app-image \
+            --name StarSea \
+            --input "$JAR_DIR" \
+            --main-jar "$(basename "$JAR")" \
+            --main-class com.stars.app.MainKt \
+            --runtime-image "$JLINK_DIR" \
+            --dest desktop-app/build/jpackage-out \
+            --win-console \
+            --java-options "-Xmx512m" 2>&1 | tee -a /tmp/build.log
+          test -d "desktop-app/build/jpackage-out/StarSea" || {
+            echo "FATAL: app-image 未生成"; exit 1; }
+          echo "app-image OK ($(du -sh desktop-app/build/jpackage-out/StarSea | cut -f1))"
 
-      - name: Package Windows portable
+      - name: Verify jdk.httpserver in bundled JRE (gate)
         shell: bash
         run: |
-          ./gradlew :desktop-app:packageDistributionForCurrentOS \
-            --no-daemon --console=plain \
-            -PpackageVersion=${{ github.event.inputs.version || '1.0.1' }}
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
-
-      - name: Verify jdk.httpserver in bundled JRE
-        shell: bash
-        run: |
-          MODS=$(find desktop-app/build/compose/binaries -name modules -path '*runtime/lib*' | head -1)
-          echo "modules: $MODS"
-          [ -f "$MODS" ] || { echo "::error::modules not found"; exit 1; }
+          MODS="desktop-app/build/jpackage-out/StarSea/runtime/lib/modules"
+          [ -f "$MODS" ] || { echo "::error::modules not found at $MODS"; exit 1; }
           for m in jdk.httpserver com.sun.net.httpserver HttpServer; do
-            echo "$m: $(grep -c "$m" "$MODS" || echo 0)"
+            c=$(grep -c "$m" "$MODS" || echo 0)
+            echo "$m occurrences: $c"
           done
+          # jdk.httpserver 必须在（登录回调代理依赖）
+          grep -q "jdk.httpserver" "$MODS" || { echo "::error::jdk.httpserver missing"; exit 1; }
 
       - name: Zip
         shell: pwsh
         run: |
-          $app = Get-ChildItem -Path "desktop-app\build\compose\binaries" -Directory -Recurse -Filter "StarSea" | Select-Object -First 1
-          if (-not $app) { Write-Error "StarSea not found"; exit 1 }
-          $out = "StarSea_PrivateCheck_${{ github.event.inputs.version || '1.0.1' }}.zip"
-          Compress-Archive -Path $app.FullName -DestinationPath $out -Force
+          $out = "StarSea_PrivateCheck_${{ github.event.inputs.version || '1.0.2' }}.zip"
+          Compress-Archive -Path "desktop-app\build\jpackage-out\StarSea" -DestinationPath $out -Force
           Write-Host "$out : $([math]::Round((Get-Item $out).Length/1MB,1)) MB"
 
       - name: Upload artifact (no cloud upload)
