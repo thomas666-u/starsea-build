@@ -27,7 +27,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
-      SOURCE_REPO: thomas666-u/Starseatool
+      # ★ 2026-10-01 源码仓库切换为新的协作仓库（私有；本仓库仅负责编译）
+      SOURCE_REPO: thomas666-u/starsea-app
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
