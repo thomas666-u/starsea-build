@@ -65,6 +65,15 @@ jobs:
         run: |
           test -f starsea-release.jks && echo "keystore OK" || { echo "ERROR: keystore not found"; exit 1; }
 
+      # ★ 2026-10-01 新增门禁：构建前先跑分享链接识别回归测试。
+      #   解析是取链的入口，识别层回归代价最高；测试红则直接不出包。
+      - name: Run parser unit tests (gate)
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --no-daemon --no-parallel \
+            --tests 'com.stars.app.data.network.ShareLinkParserTest' 2>&1 | tee /tmp/unit-test.log
+        shell: bash
+
       - name: Build
         run: |
           chmod +x gradlew
