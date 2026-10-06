@@ -1,0 +1,57 @@
+name: Build Gopeed Server CLI
+# 用 fork 源码（含 h2 掉速修复 / guard）重建桌面端捆绑的 gopeed server 二进制。
+# 产物：gopeed-server-win-x64.exe / gopeed-server-linux-x64（cmd/web + 占位 dist，仅用 REST）。
+# 桌面端 CI（build-flutter-desktop.yml）从 starsea-build 的 gopeed-cli release 拉取。
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build-server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gopeed fork (Starseatool)
+        uses: actions/checkout@v4
+        with:
+          repository: thomas666-u/Starseatool
+          ref: main
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: src
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Placeholder web dist (desktop 只用 REST，不需要真实 web UI)
+        run: |
+          mkdir -p src/gopeed-src/cmd/web/dist
+          printf '<!doctype html><meta charset="utf-8"><title>StarSea Core</title><p>StarSea gopeed core (REST only)</p>' > src/gopeed-src/cmd/web/dist/index.html
+      - name: Build windows + linux server
+        working-directory: src/gopeed-src
+        run: |
+          set -e
+          export CGO_ENABLED=0
+          GOOS=windows GOARCH=amd64 go build -tags "nosqlite,web" -ldflags "-s -w" -o /tmp/gopeed-server-win-x64.exe ./cmd/web
+          GOOS=linux GOARCH=amd64 go build -tags "nosqlite,web" -ldflags "-s -w" -o /tmp/gopeed-server-linux-x64 ./cmd/web
+          ls -lh /tmp/gopeed-server-*
+      - name: Smoke check (linux binary boots and serves /api/v1/tasks)
+        run: |
+          set -e
+          chmod +x /tmp/gopeed-server-linux-x64
+          /tmp/gopeed-server-linux-x64 -A 127.0.0.1 -P 29999 -T testtoken -d /tmp/gopeed-storage > /tmp/gopeed.log 2>&1 &
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer testtoken' http://127.0.0.1:29999/api/v1/tasks || true)
+            echo "attempt $i -> $code"
+            if [ "$code" = "200" ]; then break; fi
+            sleep 1
+          done
+          cat /tmp/gopeed.log || true
+          test "$code" = "200"
+      - name: Publish to gopeed-cli release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: gopeed-cli
+          name: gopeed-cli
+          files: |
+            /tmp/gopeed-server-win-x64.exe
+            /tmp/gopeed-server-linux-x64
+          fail_on_unmatched_files: true
