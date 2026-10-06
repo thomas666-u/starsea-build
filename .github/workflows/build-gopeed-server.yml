@@ -43,8 +43,10 @@ jobs:
           set -e
           chmod +x /tmp/gopeed-server-linux-x64
           /tmp/gopeed-server-linux-x64 -A 127.0.0.1 -P 29999 -T testtoken -d /tmp/gopeed-storage > /tmp/gopeed.log 2>&1 &
+          code=""
           for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer testtoken' http://127.0.0.1:29999/api/v1/tasks || true)
+            # ★ gopeed 的 API token 只认 X-Api-Token 头（Authorization Bearer → 401）
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Api-Token: testtoken' http://127.0.0.1:29999/api/v1/tasks || true)
             echo "attempt $i -> $code"
             if [ "$code" = "200" ]; then break; fi
             sleep 1
