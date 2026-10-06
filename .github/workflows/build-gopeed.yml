@@ -102,6 +102,18 @@ jobs:
           cp libgojni-arm64.so "libgojni_${BUILD_TAG}.zip"
           echo "BUILD_TAG=$BUILD_TAG" >> $GITHUB_ENV
 
+      - name: Compute sha256 & size (for fastCore manifest)
+        run: |
+          FILE="libgojni_${BUILD_TAG}.zip"
+          SHA=$(sha256sum "$FILE" | cut -d' ' -f1)
+          SIZE=$(stat -c %s "$FILE")
+          echo "SO_SHA256=$SHA" >> $GITHUB_ENV
+          echo "SO_SIZE=$SIZE" >> $GITHUB_ENV
+          echo "=== FASTCORE MANIFEST (pre-upload) ==="
+          echo "version=$BUILD_TAG"
+          echo "sha256=$SHA"
+          echo "size=$SIZE"
+          echo "file=$FILE"
       - name: Install Python deps
         run: pip install requests -q
 
@@ -113,6 +125,12 @@ jobs:
           python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.zip" "libgojni_${{ env.BUILD_TAG }}.zip" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
           echo "PROTECT_NAME=libgojni_${{ env.BUILD_TAG }}.zip" >> $GITHUB_ENV
 
+      - name: Print fastCore manifest (paste into server config)
+        run: |
+          echo "=== FASTCORE MANIFEST ==="
+          echo "version=$BUILD_TAG"
+          echo "sha256=$SO_SHA256"
+          echo "size=$SO_SIZE"
       - name: Cleanup old builds (keep 5, protect current)
         env:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
