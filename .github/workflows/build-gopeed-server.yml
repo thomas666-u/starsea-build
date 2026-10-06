@@ -9,6 +9,11 @@ permissions:
 jobs:
   build-server:
     runs-on: ubuntu-latest
+    env:
+      # proxy.golang.org 偶发 stream error（已实测一次失败）；换国内代理 + 关闭 sumdb 校验
+      GOPROXY: https://goproxy.cn,direct
+      GOSUMDB: "off"
+      GOFLAGS: -mod=mod
     steps:
       - name: Checkout gopeed fork (Starseatool)
         uses: actions/checkout@v4
