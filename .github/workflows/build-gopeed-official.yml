@@ -1,0 +1,95 @@
+# Build OFFICIAL gopeed libgojni.so (android/arm64)
+#
+# 用途：给 App 提供「官方内核」选项 —— 一旦自研 fork 出问题，用户可切回官方 so，
+#       互不影响（App 侧按 variant 选择下载哪一份）。
+# 产物：libgojni-official_<ref>_<时间>.zip（内含 libgojni.so），并打 release 便于分发。
+name: Build Gopeed Official .so
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '官方 gopeed ref（tag / commit，如 v1.8.1）'
+        required: false
+        default: 'v1.8.1'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout official gopeed
+        uses: actions/checkout@v4
+        with:
+          repository: GopeedLab/gopeed
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 1
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Setup NDK
+        run: |
+          export ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/*/ 2>/dev/null | head -1)
+          if [ -z "$ANDROID_NDK_HOME" ]; then
+            yes | sdkmanager "ndk;27.0.12077973" >/dev/null 2>&1 || true
+            export ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/*/ 2>/dev/null | head -1)
+          fi
+          echo "NDK: $ANDROID_NDK_HOME"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Build official .so
+        run: |
+          gomobile init
+          gomobile bind \
+            -target=android/arm64 \
+            -androidapi 23 \
+            -ldflags=-checklinkname=0 \
+            -o ../libgojni-official.aar \
+            ./bind/mobile
+
+      - name: Extract and strip .so
+        run: |
+          mkdir -p /tmp/aar && cd /tmp/aar
+          unzip -o -q "$GITHUB_WORKSPACE/libgojni-official.aar"
+          cp jni/arm64-v8a/libgojni.so "$GITHUB_WORKSPACE/libgojni-official-arm64.so"
+          STRIP=$(find $ANDROID_NDK_HOME -name llvm-strip | head -1)
+          $STRIP --strip-unneeded "$GITHUB_WORKSPACE/libgojni-official-arm64.so"
+
+      - name: Package + hash
+        run: |
+          REF="${{ github.event.inputs.ref }}"
+          TAG="gopeed-official_${REF}_$(date +%Y%m%d_%H%M%S)"
+          FILE="libgojni-official_${TAG}.zip"
+          cp libgojni-official-arm64.so "$FILE"
+          SHA=$(sha256sum "$FILE" | cut -d' ' -f1)
+          SIZE=$(stat -c %s "$FILE")
+          echo "FILE=$FILE" >> $GITHUB_ENV
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "=== OFFICIAL CORE MANIFEST ==="
+          echo "variant=official"
+          echo "ref=$REF"
+          echo "file=$FILE"
+          echo "sha256=$SHA"
+          echo "size=$SIZE"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gopeed-official-so
+          path: libgojni-official_*.zip
+          retention-days: 30
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          files: ${{ env.FILE }}
