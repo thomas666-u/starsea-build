@@ -45,6 +45,12 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
+      - name: Add x/mobile dependency (gomobile bind 要求模块内有该依赖)
+        run: |
+          # 官方 gopeed 的 go.mod 不含 golang.org/x/mobile，需先加入依赖图
+          go get golang.org/x/mobile/cmd/gobind 2>/dev/null || go get golang.org/x/mobile@latest || true
+          go mod tidy || true
+
       - name: Build official .so
         run: |
           gomobile init
