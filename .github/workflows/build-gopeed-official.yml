@@ -1,8 +1,8 @@
 # Build OFFICIAL gopeed libgojni.so (android/arm64)
 #
-# 用途：给 App 提供「官方内核」选项 —— 一旦自研 fork 出问题，用户可切回官方 so，
-#       互不影响（App 侧按 variant 选择下载哪一份）。
-# 产物：libgojni-official_<ref>_<时间>.zip（内含 libgojni.so），并打 release 便于分发。
+# 用途：App 「高速内核」可选 自研(fork) / 官方(official)，互不影响。
+# 官方内核特点：上游原生下载逻辑（请求头走 REST req.extra.header，天然支持 Cookie/UA/Referer），
+#           仅注入一个稳定性补丁（rlimit：FD 上限提升，防高线程 EMFILE）。
 name: Build Gopeed Official .so
 on:
   workflow_dispatch:
@@ -48,65 +48,29 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
-      - name: Add x/mobile dependency (gomobile bind 要求模块内有该依赖)
+      - name: Add x/mobile dependency
         env:
           GOFLAGS: -mod=mod
         run: |
           # 官方 gopeed 的 go.mod 不含 golang.org/x/mobile，需先注入依赖图
-          # 用与自研 fork 相同的 pin 版本，避免版本差异导致的 ABI 问题
+          # 用与自研 fork 相同的 pin 版本，避免 ABI 差异
           go get golang.org/x/mobile@v0.0.0-20260821190718-4776eadac327
-          # ★ 不能跑 go mod tidy：它会把“未被代码引用”的 x/mobile 又删掉（实测）。
-          #   按 gomobile 的提示用 -tool 记录 tool 指令，保留依赖。
+          # 不能跑 go mod tidy（会把未被引用的 x/mobile 又删掉）→ 用 -tool 保留
           go get -tool golang.org/x/mobile/cmd/gobind@v0.0.0-20260821190718-4776eadac327 || go get golang.org/x/mobile/cmd/gobind@v0.0.0-20260821190718-4776eadac327
-          echo "--- go.mod mobile 依赖 ---"
           grep -n "x/mobile" go.mod || true
 
-      - name: Inject rlimit patch (FD \u4e0a\u9650\u63d0\u5347\uff0c\u9632\u9ad8\u7ebf\u7a0b EMFILE)
+      - name: Inject rlimit patch (FD 上限提升，防高线程 EMFILE)
+        uses: actions/checkout@v4
+        with:
+          repository: thomas666-u/starsea-build
+          ref: main
+          path: _ci
+          fetch-depth: 1
+      - name: Copy rlimit patch into module
         run: |
-          # StarSea fork \u7684\u7a33\u5b9a\u6027\u8865\u4e01\uff1a\u5b98\u65b9 so \u6ca1\u6709\u8fd9\u4e00\u6bb5\uff0c
-          #   \u5728 256/512 \u5e76\u53d1\u4e0b\u4f1a\u649e\u5230 Android \u8fdb\u7a0b fd \u8f6f\u4e0a\u9650\uff081024\uff09\u2192 EMFILE \u5361\u6b7b\u3002
-          #   \u6ce8\u5165\u540e\u5b98\u65b9\u5185\u6838\u4e0e\u81ea\u7814\u5185\u6838\u5728\u6b64\u884c\u4e3a\u4e0a\u4e00\u81f4\uff08\u4e0d\u6539\u4e0b\u8f7d\u903b\u8f91\uff09\u3002
-          cat > bind/mobile/rlimit.go <<'RLIMIT_EOF'
-          //go:build linux
-
-          package libgopeed
-
-          import (
-          	"log"
-          	"syscall"
-          )
-
-          // 2026-10-05 高速核心性能修复：
-          // 多任务同时开高线程（例如每个任务 512 连接）时，Android 进程默认的 fd 软上限
-          // （常见 1024）会先被撞到下（EMFILE），表现为「连接建不起来 / 下载卡死 / 速度骤降」，
-          // 而不是带宽或内核调度问题。启动时把软上限抬到硬上限（并尽量抬硬上限到 1<<20）。
-          func init() { raiseFdLimit() }
-
-          func raiseFdLimit() {
-          	var lim syscall.Rlimit
-          	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim); err != nil {
-          		return
-          	}
-          	cur, max := lim.Cur, lim.Max
-
-          	const want = 1 << 20
-          	if max < want {
-          		try := syscall.Rlimit{Cur: want, Max: want}
-          		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &try); err == nil {
-          			cur, max = try.Cur, try.Max
-          		}
-          	}
-          	if cur < max {
-          		lim.Cur, lim.Max = max, max
-          		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim); err == nil {
-          			cur = max
-          		}
-          	}
-          	log.Printf("[gopeed] RLIMIT_NOFILE cur=%d max=%d (多任务高线程需求)", cur, max)
-          }
-RLIMIT_EOF
-          echo "--- injected ---"
-          head -5 bind/mobile/rlimit.go
+          cp _ci/.github/patches/rlimit.go bind/mobile/rlimit.go
+          echo "--- injected rlimit.go ---"
+          head -6 bind/mobile/rlimit.go
 
       - name: Build official .so
         run: |
@@ -121,7 +85,7 @@ RLIMIT_EOF
       - name: Extract and strip .so
         run: |
           mkdir -p /tmp/aar && cd /tmp/aar
-          unzip -o -q "$GITHUB_WORKSPACE/libgojni-official.aar" || ls -la "$GITHUB_WORKSPACE" | head -20
+          unzip -o -q "$GITHUB_WORKSPACE/libgojni-official.aar"
           cp jni/arm64-v8a/libgojni.so "$GITHUB_WORKSPACE/libgojni-official-arm64.so"
           STRIP=$(find $ANDROID_NDK_HOME -name llvm-strip | head -1)
           $STRIP --strip-unneeded "$GITHUB_WORKSPACE/libgojni-official-arm64.so"
