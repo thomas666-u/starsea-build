@@ -52,8 +52,9 @@ jobs:
           # 官方 gopeed 的 go.mod 不含 golang.org/x/mobile，需先注入依赖图
           # 用与自研 fork 相同的 pin 版本，避免版本差异导致的 ABI 问题
           go get golang.org/x/mobile@v0.0.0-20260821190718-4776eadac327
-          go get golang.org/x/mobile/cmd/gobind@v0.0.0-20260821190718-4776eadac327
-          go mod tidy
+          # ★ 不能跑 go mod tidy：它会把“未被代码引用”的 x/mobile 又删掉（实测）。
+          #   按 gomobile 的提示用 -tool 记录 tool 指令，保留依赖。
+          go get -tool golang.org/x/mobile/cmd/gobind@v0.0.0-20260821190718-4776eadac327 || go get golang.org/x/mobile/cmd/gobind@v0.0.0-20260821190718-4776eadac327
           echo "--- go.mod mobile 依赖 ---"
           grep -n "x/mobile" go.mod || true
 
