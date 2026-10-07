@@ -61,6 +61,53 @@ jobs:
           echo "--- go.mod mobile 依赖 ---"
           grep -n "x/mobile" go.mod || true
 
+      - name: Inject rlimit patch (FD \u4e0a\u9650\u63d0\u5347\uff0c\u9632\u9ad8\u7ebf\u7a0b EMFILE)
+        run: |
+          # StarSea fork \u7684\u7a33\u5b9a\u6027\u8865\u4e01\uff1a\u5b98\u65b9 so \u6ca1\u6709\u8fd9\u4e00\u6bb5\uff0c
+          #   \u5728 256/512 \u5e76\u53d1\u4e0b\u4f1a\u649e\u5230 Android \u8fdb\u7a0b fd \u8f6f\u4e0a\u9650\uff081024\uff09\u2192 EMFILE \u5361\u6b7b\u3002
+          #   \u6ce8\u5165\u540e\u5b98\u65b9\u5185\u6838\u4e0e\u81ea\u7814\u5185\u6838\u5728\u6b64\u884c\u4e3a\u4e0a\u4e00\u81f4\uff08\u4e0d\u6539\u4e0b\u8f7d\u903b\u8f91\uff09\u3002
+          cat > bind/mobile/rlimit.go <<'RLIMIT_EOF'
+          //go:build linux
+
+          package libgopeed
+
+          import (
+          	"log"
+          	"syscall"
+          )
+
+          // 2026-10-05 高速核心性能修复：
+          // 多任务同时开高线程（例如每个任务 512 连接）时，Android 进程默认的 fd 软上限
+          // （常见 1024）会先被撞到下（EMFILE），表现为「连接建不起来 / 下载卡死 / 速度骤降」，
+          // 而不是带宽或内核调度问题。启动时把软上限抬到硬上限（并尽量抬硬上限到 1<<20）。
+          func init() { raiseFdLimit() }
+
+          func raiseFdLimit() {
+          	var lim syscall.Rlimit
+          	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim); err != nil {
+          		return
+          	}
+          	cur, max := lim.Cur, lim.Max
+
+          	const want = 1 << 20
+          	if max < want {
+          		try := syscall.Rlimit{Cur: want, Max: want}
+          		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &try); err == nil {
+          			cur, max = try.Cur, try.Max
+          		}
+          	}
+          	if cur < max {
+          		lim.Cur, lim.Max = max, max
+          		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim); err == nil {
+          			cur = max
+          		}
+          	}
+          	log.Printf("[gopeed] RLIMIT_NOFILE cur=%d max=%d (多任务高线程需求)", cur, max)
+          }
+RLIMIT_EOF
+          echo "--- injected ---"
+          head -5 bind/mobile/rlimit.go
+
       - name: Build official .so
         run: |
           gomobile init
