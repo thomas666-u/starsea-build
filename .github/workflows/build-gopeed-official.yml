@@ -65,13 +65,13 @@ jobs:
             -target=android/arm64 \
             -androidapi 23 \
             -ldflags=-checklinkname=0 \
-            -o ../libgojni-official.aar \
+            -o libgojni-official.aar \
             ./bind/mobile
 
       - name: Extract and strip .so
         run: |
           mkdir -p /tmp/aar && cd /tmp/aar
-          unzip -o -q "$GITHUB_WORKSPACE/libgojni-official.aar"
+          unzip -o -q "$GITHUB_WORKSPACE/libgojni-official.aar" || ls -la "$GITHUB_WORKSPACE" | head -20
           cp jni/arm64-v8a/libgojni.so "$GITHUB_WORKSPACE/libgojni-official-arm64.so"
           STRIP=$(find $ANDROID_NDK_HOME -name llvm-strip | head -1)
           $STRIP --strip-unneeded "$GITHUB_WORKSPACE/libgojni-official-arm64.so"
