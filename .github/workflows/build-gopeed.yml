@@ -1,25 +1,34 @@
-# Build gopeed libgojni.so (android/arm64)
-# Source checked out from thomas666-u/Starseatool (gopeed-src/ directory)
+# 编译 gopeed libgojni.so（android/arm64）
+# ★★★ 2026-10-11 用户指令：主力编译（发布/更新）统一放在 starsea-build 仓库。
+#   本仓只负责编译；gopeed 源码（gopeed-src/）私有存放在 thomas666-u/Starseatool，
+#   通过 SOURCE_REPO_TOKEN 拉取。此文件与 Starseatool/.github/workflows/build-gopeed.yml
+#   保持同步（那边是自包含版，用于直接改核心源码时的快速验证）。
+
 name: Build Gopeed .so
+
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "gopeed 源码仓库分支/tag/commit（Starseatool，默认 main）"
+        required: false
+        default: "main"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.0.12077973
-      # ★ 2026-10-01 源码仓库切换为新的协作仓库（私有；本仓库仅负责编译）
-      SOURCE_REPO: thomas666-u/starsea-app
+
     steps:
-      - name: Checkout source repo
+      - name: Checkout gopeed source from Starseatool
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.SOURCE_REPO }}
+          repository: thomas666-u/Starseatool
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
-          ref: main
+          ref: ${{ github.event.inputs.source_ref || 'main' }}
           fetch-depth: 1
 
       - name: Setup Go
@@ -47,22 +56,37 @@ jobs:
 
       - name: NDK ready check
         run: echo "NDK_HOME=$ANDROID_NDK_HOME"
-
+      # Guard data-plane gate: build source must NOT contain hooks that throttle
+      # or corrupt normal users downloads (DegradeAction/ThrottleDelay/ConnLimit/
+      # BiasOffset/SplitBias were the 2026-10 production incident). Evidence-only
+      # hooks (Beat/RingSample) are allowed.
+      - name: Guard data-plane gate
+        working-directory: gopeed-src
+        run: |
+          echo "=== guard data-plane gate ==="
+          if grep -rnE "guard[.](DegradeAction|ThrottleDelay|DegradeStall|ConnLimit|BiasOffset|SplitBias)[(]" --include="*.go" internal/ pkg/ bind/ cmd/ 2>/dev/null | grep -v "_test.go"; then
+            echo "FAIL: harmful guard hook found in build source - refusing to build"
+            exit 1
+          fi
+          echo "OK: no harmful guard hooks in data plane"
+          echo "--- allowed evidence-only hooks ---"
+          grep -rnE "guard[.](Beat|RingSample)[(]" --include="*.go" internal/ pkg/ 2>/dev/null | grep -v "_test.go" || true
+          echo "--- build source revision ---"
+          git rev-parse HEAD
       - name: Run core test suites (gate)
         working-directory: gopeed-src
         run: |
-          echo "=== vet ==="
+          echo "=== go vet ==="
           go vet ./internal/guard/ ./internal/protocol/http/ ./internal/httpclient/ ./pkg/download/ || exit 1
-          echo "=== suite a ==="
+          echo "=== guard tests ==="
           go test ./internal/guard/ -count=1 -timeout 120s || exit 1
-          echo "=== suite b ==="
+          echo "=== httpclient tests ==="
           go test ./internal/httpclient/ -count=1 -timeout 120s || exit 1
-          echo "=== suite c ==="
+          echo "=== http protocol tests ==="
           go test ./internal/protocol/http/ -count=1 -timeout 600s || exit 1
-          echo "=== suite d ==="
+          echo "=== downloader tests ==="
           go test ./pkg/download/ -count=1 -timeout 1200s || exit 1
           echo "ALL TESTS PASSED"
-
       - name: Build .so via gomobile bind
         working-directory: gopeed-src
         env:
@@ -71,7 +95,7 @@ jobs:
           go get golang.org/x/mobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
           if [ -n "$GUARD_KEYS_LD" ]; then
-            echo "build variant: A"
+            echo "guard keys injected (kid list: $(echo "$GUARD_KEYS_LD" | cut -d: -f1))"
             gomobile bind \
               -target=android/arm64 \
               -androidapi 23 \
@@ -79,7 +103,7 @@ jobs:
               -o ../libgopeed.aar \
               ./bind/mobile
           else
-            echo "build variant: B"
+            echo "WARNING: GUARD_KEYS_LD secret not set — building UNARMED so (no license enforcement)"
             gomobile bind \
               -target=android/arm64 \
               -androidapi 23 \
@@ -102,25 +126,15 @@ jobs:
           cp libgojni-arm64.so "libgojni_${BUILD_TAG}.zip"
           echo "BUILD_TAG=$BUILD_TAG" >> $GITHUB_ENV
 
-      - name: Compute sha256 & size (for fastCore manifest)
+      - name: Print artifact digest
         run: |
-          FILE="libgojni_${BUILD_TAG}.zip"
-          SHA=$(sha256sum "$FILE" | cut -d' ' -f1)
-          SIZE=$(stat -c %s "$FILE")
-          echo "SO_SHA256=$SHA" >> $GITHUB_ENV
-          echo "SO_SIZE=$SIZE" >> $GITHUB_ENV
-          echo "=== FASTCORE MANIFEST (pre-upload) ==="
-          echo "version=$BUILD_TAG"
-          echo "sha256=$SHA"
-          echo "size=$SIZE"
-          echo "file=$FILE"
-      - name: Upload .so as workflow artifact (reliable fallback)
-        uses: actions/upload-artifact@v4
-        with:
-          name: gopeed-so
-          path: libgojni_*.zip
-          retention-days: 3
-          if-no-files-found: error
+          Z=libgojni_${BUILD_TAG}.zip
+          echo ARTIFACT_ZIP=$Z
+          echo ARTIFACT_SHA256=$(sha256sum $Z | head -c 64)
+          echo ARTIFACT_SIZE=$(stat -c%s $Z)
+          echo ARTIFACT_SO_SHA256=$(sha256sum libgojni-arm64.so | head -c 64)
+          echo ARTIFACT_SO_SIZE=$(stat -c%s libgojni-arm64.so)
+          { echo "### core digest"; echo "zip sha256: $(sha256sum $Z | head -c 64)"; echo "zip size: $(stat -c%s $Z)"; } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
       - name: Install Python deps
         run: pip install requests -q
 
@@ -132,15 +146,10 @@ jobs:
           python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.zip" "libgojni_${{ env.BUILD_TAG }}.zip" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
           echo "PROTECT_NAME=libgojni_${{ env.BUILD_TAG }}.zip" >> $GITHUB_ENV
 
-      - name: Print fastCore manifest (paste into server config)
-        run: |
-          echo "=== FASTCORE MANIFEST ==="
-          echo "version=$BUILD_TAG"
-          echo "sha256=$SO_SHA256"
-          echo "size=$SO_SIZE"
       - name: Cleanup old builds (keep 5, protect current)
         env:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
+          # ★ 只清理 .so 文件（libgojni_*.zip），保护本次上传；避免误删 APK 与同分钟新文件
           python3 scripts/lanzou_upload.py cleanup "Build" 5 "--protect=${{ env.PROTECT_NAME }}" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
