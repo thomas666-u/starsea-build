@@ -68,11 +68,13 @@ jobs:
 
       # ★ 2026-10-01 新增门禁：构建前先跑分享链接识别回归测试。
       #   解析是取链的入口，识别层回归代价最高；测试红则直接不出包。
-      - name: Run parser unit tests (gate)
+      # ★★★ 2026-10-16 门禁矩阵扩到「App 全量单测」（原 P0-6 阻塞项 #8）：
+      #   仓库里仅 2 个测试类（ShareLinkParserTest / XunleiKoulingTest），
+      #   跑全量成本几乎为零 → 去掉 --tests 过滤，把迅雷口令识别也纳入门禁。
+      - name: Unit tests (gate: 全量)
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest --no-daemon --no-parallel \
-            --tests 'com.stars.app.data.network.ShareLinkParserTest' 2>&1 | tee /tmp/unit-test.log
+          ./gradlew testDebugUnitTest --no-daemon --no-parallel 2>&1 | tee /tmp/unit-test.log
         shell: bash
 
       - name: Build

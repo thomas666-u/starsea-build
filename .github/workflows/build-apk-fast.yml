@@ -101,12 +101,18 @@ jobs:
         run: |
           test -f starsea-release.jks && echo "keystore OK" || { echo "ERROR: keystore not found"; exit 1; }
 
-      - name: Parser unit tests (gate)
+      - name: Unit tests (gate: 全量)
         if: ${{ github.event.inputs.skip_tests != 'true' }}
         run: |
+          # ★★★ 2026-10-16 门禁矩阵落实（原 P0-6 阻塞项 #8）：
+          #   此前只跑 `--tests ShareLinkParserTest` 一个类；仓库里实际只有 2 个测试类
+          #   （ShareLinkParserTest / XunleiKoulingTest），跑全量成本几乎为零，
+          #   但能把「迅雷口令识别」也纳入门禁 —— 所以直接去掉 --tests 过滤，跑全量。
           chmod +x gradlew
-          ./gradlew testDebugUnitTest --no-daemon --no-parallel \
-            --tests 'com.stars.app.data.network.ShareLinkParserTest' -q || exit 1
+          ./gradlew testDebugUnitTest --no-daemon --no-parallel || {
+            echo "::error::单位测试未通过，不出包"
+            exit 1
+          }
 
       - name: Build APK
         run: |
