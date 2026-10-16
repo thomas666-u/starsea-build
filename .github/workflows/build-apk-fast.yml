@@ -101,7 +101,7 @@ jobs:
         run: |
           test -f starsea-release.jks && echo "keystore OK" || { echo "ERROR: keystore not found"; exit 1; }
 
-      - name: Unit tests (gate: 全量)
+      - name: "Unit tests (gate: all)"
         if: ${{ github.event.inputs.skip_tests != 'true' }}
         run: |
           # ★★★ 2026-10-16 门禁矩阵落实（原 P0-6 阻塞项 #8）：

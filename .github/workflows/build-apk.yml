@@ -71,7 +71,7 @@ jobs:
       # ★★★ 2026-10-16 门禁矩阵扩到「App 全量单测」（原 P0-6 阻塞项 #8）：
       #   仓库里仅 2 个测试类（ShareLinkParserTest / XunleiKoulingTest），
       #   跑全量成本几乎为零 → 去掉 --tests 过滤，把迅雷口令识别也纳入门禁。
-      - name: Unit tests (gate: 全量)
+      - name: "Unit tests (gate: all)"
         run: |
           chmod +x gradlew
           ./gradlew testDebugUnitTest --no-daemon --no-parallel 2>&1 | tee /tmp/unit-test.log
