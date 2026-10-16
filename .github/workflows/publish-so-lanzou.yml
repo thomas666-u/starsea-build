@@ -1,0 +1,110 @@
+name: Publish .so to Lanzou (no rebuild)
+
+# ★★★ 2026-10-16 新增：把**已构建好**的 .so 重新上传到蓝奏云，拿到分享链接。
+#
+# 背景：`Build Gopeed .so` 里的蓝奏上传对 45MB 产物太慢（实测：7MB 的 APK 上传要 ~5.4 分钟，
+#   按同速推 45MB 需要 ~35 分钟），经常撞上 job 超时或步骤超时，导致
+#   「产物有了、但清单要的 shareUrl 没拿到」→ 核心发不出去。
+#
+# 用途：核心编译与「发布到蓝奏」解耦 —— 编译失败/上传失败互不牵连；
+#   重传也不用重新跑 20 分钟的测试门禁与 gomobile bind。
+#
+# 用法（Actions → 本 workflow → Run workflow）：
+#   artifact_name  必填：目标 artifact 名（如 libgojni-gopeed_20261016_122240）
+#   run_id         必填：该 artifact 所属的 workflow run id（页面 URL 里的数字）
+#
+# 输出：日志里会打印 `LANZOU_SHARE_URL` / `LANZOU_SHARE_PWD`（这就是要写进 /fastCore 的值）。
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_name:
+        description: "artifact 名（如 libgojni-gopeed_20261016_122240）"
+        required: true
+      run_id:
+        description: "artifact 所属 run id（workflow run URL 里的数字）"
+        required: true
+      folder:
+        description: "蓝奏云目标文件夹"
+        required: false
+        default: "Build"
+      timeout_sec:
+        description: "上传硬超时（秒）；45MB 建议 2400"
+        required: false
+        default: "2400"
+      do_cleanup:
+        description: "是否顺带清理旧产物（keep 5）"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout (for scripts/)
+        uses: actions/checkout@v4
+        with:
+          repository: thomas666-u/starsea-app
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          ref: main
+          fetch-depth: 1
+
+      - name: Download artifact from previous run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # ★ 注意：这里刻意用**单行** python -c —— 多行内嵌脚本会把 `run: |` 块缩进打断，
+          #   YAML 直接解析失败（GitHub 报 422 / 文件报错，症状很误导）。详见 P0-7 踩坑记录。
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts"
+          WANT="${{ github.event.inputs.artifact_name }}"
+          # 找不到就直接失败，避免又出现「静默空转」
+          ART_ID=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" "${API}?per_page=100" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);h=[a for a in d.get('artifacts',[]) if a['name']=='$WANT' and not a['expired']];print(h[0]['id'] if h else '')")
+          if [ -z "$ART_ID" ]; then
+            echo "::error::没找到未过期的 artifact「$WANT」（检查名字/是否已过期）"
+            exit 1
+          fi
+          echo "artifact id = $ART_ID"
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" "${API}/${ART_ID}/zip" -o so_art.zip
+          ls -la so_art.zip
+          mkdir -p out && cd out && unzip -o ../so_art.zip >/dev/null
+          echo "--- 解包结果 ---"; ls -la
+
+      - name: Install Python deps
+        run: pip install requests -q
+
+      - name: Upload .so to Lanzou
+        env:
+          LANZOU_USER: ${{ secrets.LANZOU_USER }}
+          LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
+        run: |
+          set -euo pipefail
+          cd out
+          # 优先上传改名后的 .zip（蓝奏不许 .so 后缀）；没有就用原始 .so 现打包
+          FILE=$(ls libgojni_*.zip 2>/dev/null | head -1 || true)
+          if [ -z "$FILE" ]; then
+            FILE="libgojni_${{ github.event.inputs.artifact_name }}.zip"
+            cp libgojni-arm64.so "$FILE"
+          fi
+          echo "上传文件：$FILE（$(stat -c%s "$FILE") 字节）"
+          # ★ 关键：不吞输出 —— 脚本会把分享链接打在 stdout，这里要让它进日志
+          timeout "${{ github.event.inputs.timeout_sec }}" \
+            python3 ../scripts/lanzou_upload.py upload-nolog \
+            "$FILE" "$FILE" "${{ github.event.inputs.folder }}" "$LANZOU_USER" "$LANZOU_PASS" \
+            || { echo "::error::蓝奏上传失败/超时（产物仍是安全的，可重跑本 workflow）"; exit 1; }
+          echo "PROTECT_NAME=$FILE" >> "$GITHUB_ENV"
+          echo "FILE_NAME=$FILE" >> "$GITHUB_ENV"
+
+      - name: Cleanup old files (optional)
+        if: ${{ github.event.inputs.do_cleanup == 'true' }}
+        env:
+          LANZOU_USER: ${{ secrets.LANZOU_USER }}
+          LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
+        run: |
+          cd out
+          timeout 300 python3 ../scripts/lanzou_upload.py cleanup \
+            "${{ github.event.inputs.folder }}" 5 "--protect=${PROTECT_NAME}" \
+            "$LANZOU_USER" "$LANZOU_PASS" || echo "::warning::清理超时（不影响本次发布）"
