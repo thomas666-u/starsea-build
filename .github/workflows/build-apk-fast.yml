@@ -1,0 +1,159 @@
+name: Build StarSea Fast (artifact only)
+
+# ★★★ 2026-10-16 新增：把「快速出包」迁到本仓库（public）
+#
+# 背景（已取证）：
+#   thomas666-u/starsea-app 是**私有仓库**。私有仓库的 Actions 消耗账号的每月免费额度
+#   （2000 分钟）；额度用尽后，job 会在 ~1 秒内直接失败且 **steps = 0**：
+#     "The job was not started because recent account payments have failed
+#      or your spending limit needs to be increased."
+#   证据：run #190~#201（2026-10-14 ~ 10-16）连续 11+ 次 failure，耗时均 3~4 秒、无任何 step。
+#   而本仓库（starsea-build）是 **public**，Actions 分钟数免费且不限量 → 同提交的
+#   Build StarSea 一直是绿的（run #591 success，19 steps）。
+#
+# 因此：fast 出包**从私有仓库搬到本仓库**执行（源码仍从私有仓库 token 拉取）。
+#   · 不传蓝奏云（上传是最慢一环，动辄数分钟）
+#   · 产物只进 **Artifacts**，Actions 页面一键下载（几秒~十几秒）
+#   · 供「改完立刻有包可测」，正式发布包仍走 Build StarSea（含蓝奏云上传）
+#
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "源仓库分支/tag/commit（默认 main）"
+        required: false
+        default: "main"
+      build_type:
+        description: "构建类型"
+        required: false
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+      skip_tests:
+        description: "跳过解析回归测试（更快）"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  # 连续 dispatch 时取消上一次未跑完的 fast 构建
+  group: build-apk-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      SOURCE_REPO: thomas666-u/starsea-app
+      BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+    steps:
+      - name: Checkout source from private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          ref: ${{ github.event.inputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Ensure Android SDK
+        run: |
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" >/dev/null 2>&1 || true
+          yes | sdkmanager "platforms;android-34" "build-tools;34.0.0" >/dev/null 2>&1 || true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-fast-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-fast-${{ runner.os }}-
+            gradle-${{ runner.os }}-
+
+      - name: Setup CI environment
+        run: |
+          mkdir -p ~/.gradle
+          {
+            echo "android.aapt2FromMavenOverride="
+            echo "org.gradle.daemon=false"
+            echo "org.gradle.parallel=false"
+            echo "org.gradle.configuration-cache=false"
+            echo "org.gradle.caching=true"
+            echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
+          } >> ~/.gradle/gradle.properties
+
+      - name: Verify keystore
+        run: |
+          test -f starsea-release.jks && echo "keystore OK" || { echo "ERROR: keystore not found"; exit 1; }
+
+      - name: Parser unit tests (gate)
+        if: ${{ github.event.inputs.skip_tests != 'true' }}
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --no-daemon --no-parallel \
+            --tests 'com.stars.app.data.network.ShareLinkParserTest' -q || exit 1
+
+      - name: Build APK
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          TASK=$([ "$BUILD_TYPE" = "debug" ] && echo assembleDebug || echo assembleRelease)
+          echo "task=$TASK"
+          # 过滤 R8 的 kotlin metadata 重复告警（无害但会冲走有用日志），完整日志落盘
+          ./gradlew "$TASK" --no-daemon --no-parallel --build-cache 2>&1 \
+            | tee /tmp/build.log \
+            | grep -v 'An error occurred when parsing kotlin metadata'
+        shell: bash
+
+      - name: Prepare artifact name
+        if: always()
+        run: |
+          VERSION=$(grep -m1 'versionName' app/build.gradle.kts | sed 's/.*= *"//;s/".*//' || echo unknown)
+          VCODE=$(grep -m1 'versionCode' app/build.gradle.kts | sed 's/.*= *//' || echo 0)
+          echo "BUILD_TAG=${VERSION}.${VCODE}_$(date +%Y%m%d_%H%M%S)" >> $GITHUB_ENV
+          echo "version=$VERSION ($VCODE)"
+
+      - name: Rename APK
+        if: always()
+        run: |
+          SRC="app/build/outputs/apk/${BUILD_TYPE}/app-${BUILD_TYPE}.apk"
+          if [ -f "$SRC" ]; then
+            cp "$SRC" "Starsea_${BUILD_TAG}.apk"
+            ls -la "Starsea_${BUILD_TAG}.apk"
+          else
+            echo "APK not found at $SRC"
+          fi
+        shell: bash
+
+      - name: Upload APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Starsea-fast-${{ env.BUILD_TAG }}
+          path: Starsea_*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Starsea-fast-log-${{ env.BUILD_TAG }}
+          path: /tmp/build.log
+          if-no-files-found: ignore
+          retention-days: 7
