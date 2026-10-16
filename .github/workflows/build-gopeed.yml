@@ -135,15 +135,29 @@ jobs:
           echo ARTIFACT_SO_SHA256=$(sha256sum libgojni-arm64.so | head -c 64)
           echo ARTIFACT_SO_SIZE=$(stat -c%s libgojni-arm64.so)
           { echo "### core digest"; echo "zip sha256: $(sha256sum $Z | head -c 64)"; echo "zip size: $(stat -c%s $Z)"; } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      # ★★★ 2026-10-16 新增：**可靠的产物上报（artifact）**。
+      #   为什么：蓝奏云上传这一步偶发卡死（run #37 就卡在 Upload .so to Lanzou 直到 job 超时），
+      #   一旦卡住，产物与 sha256 都拿不回来 → 无法更新 /fastCore 清单 → 核心发不出去。
+      #   artifact 上传走 GitHub 自己的存储，稳定且能直接下载（含 .so 与改名后的 .zip）。
+      - name: Upload .so artifact (reliable)
+        uses: actions/upload-artifact@v4
+        with:
+          name: libgojni-${{ env.BUILD_TAG }}
+          path: |
+            libgojni_${{ env.BUILD_TAG }}.zip
+            libgojni-arm64.so
+          if-no-files-found: error
+          retention-days: 30
       - name: Install Python deps
         run: pip install requests -q
-
       - name: Upload .so to Lanzou (Build folder)
         env:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
-          python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.zip" "libgojni_${{ env.BUILD_TAG }}.zip" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          # ★ 2026-10-16：加 15 分钟硬超时 —— 蓝奏接口偶发卡死（历史多次），
+          #   卡死会让整个 job 挂到 60 分钟超时，产物也拿不回来（现在 artifact 已兜底）。
+          timeout 900 python3 scripts/lanzou_upload.py upload-nolog "libgojni_${{ env.BUILD_TAG }}.zip" "libgojni_${{ env.BUILD_TAG }}.zip" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || echo "::warning::蓝奏上传失败/超时，产物见 GitHub artifact"
           echo "PROTECT_NAME=libgojni_${{ env.BUILD_TAG }}.zip" >> $GITHUB_ENV
 
       - name: Cleanup old builds (keep 5, protect current)
