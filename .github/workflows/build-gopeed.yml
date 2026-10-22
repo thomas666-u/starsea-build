@@ -1,7 +1,7 @@
 # 编译 gopeed libgojni.so（android/arm64）
 # ★★★ 2026-10-11 用户指令：主力编译（发布/更新）统一放在 starsea-build 仓库。
-#   本仓只负责编译；gopeed 源码（gopeed-src/）私有存放在 thomas666-u/Starseatool，
-#   通过 SOURCE_REPO_TOKEN 拉取。此文件与 Starseatool/.github/workflows/build-gopeed.yml
+#   本仓只负责编译；gopeed 源码（gopeed-src/）私有存放在 thomas666-u/starsea-app，
+#   通过 SOURCE_REPO_TOKEN 拉取。此文件与 starsea-app/.github/workflows/build-gopeed.yml
 #   保持同步（那边是自包含版，用于直接改核心源码时的快速验证）。
 
 name: Build Gopeed .so
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "gopeed 源码仓库分支/tag/commit（Starseatool，默认 main）"
+        description: "gopeed 源码仓库分支/tag/commit（starsea-app，默认 main）"
         required: false
         default: "main"
 
@@ -23,10 +23,10 @@ jobs:
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.0.12077973
 
     steps:
-      - name: Checkout gopeed source from Starseatool
+      - name: Checkout gopeed source from starsea-app
         uses: actions/checkout@v4
         with:
-          repository: thomas666-u/Starseatool
+          repository: thomas666-u/starsea-app
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
           ref: ${{ github.event.inputs.source_ref || 'main' }}
           fetch-depth: 1
