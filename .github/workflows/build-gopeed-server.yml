@@ -15,10 +15,10 @@ jobs:
       GOSUMDB: "off"
       GOFLAGS: -mod=mod
     steps:
-      - name: Checkout gopeed fork (Starseatool)
+      - name: Checkout gopeed fork (starsea-app)
         uses: actions/checkout@v4
         with:
-          repository: thomas666-u/Starseatool
+          repository: thomas666-u/starsea-app
           ref: main
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
           path: src
