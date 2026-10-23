@@ -41,6 +41,17 @@ jobs:
             gradle-hotfix-${{ runner.os }}-
             gradle-fast-${{ runner.os }}-
 
+      - name: Setup CI environment
+        run: |
+          mkdir -p ~/.gradle
+          {
+            echo "android.aapt2FromMavenOverride="
+            echo "org.gradle.daemon=false"
+            echo "org.gradle.parallel=false"
+            echo "org.gradle.configuration-cache=false"
+            echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
+          } >> ~/.gradle/gradle.properties
+
       - name: Build hotfix-test AAR
         run: ./gradlew :hotfix-test:assembleRelease --no-daemon --no-parallel
 
