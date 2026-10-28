@@ -149,18 +149,40 @@ jobs:
             cp /tmp/standard.apk "Starsea_${BUILD_TAG}_standard.apk"
             cp /tmp/ad.apk "Starsea_${BUILD_TAG}_ad.apk"
             ls -la "Starsea_${BUILD_TAG}_standard.apk" "Starsea_${BUILD_TAG}_ad.apk"
+            echo "standard_size=$(stat -c%s "Starsea_${BUILD_TAG}_standard.apk")"
+            echo "ad_size=$(stat -c%s "Starsea_${BUILD_TAG}_ad.apk")"
+            sha256sum "Starsea_${BUILD_TAG}_standard.apk" "Starsea_${BUILD_TAG}_ad.apk" > SHA256SUMS.txt
+            cat SHA256SUMS.txt
           else
             echo "::error::缺少 standard/ad 产物"
             exit 1
           fi
         shell: bash
 
-      - name: Upload APK artifact
+      - name: Upload standard APK artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Starsea-fast-${{ env.BUILD_TAG }}
-          path: Starsea_*.apk
+          name: Starsea-fast-${{ env.BUILD_TAG }}-standard
+          path: Starsea_*_standard.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload ad APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Starsea-fast-${{ env.BUILD_TAG }}-ad
+          path: Starsea_*_ad.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload checksums
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Starsea-fast-${{ env.BUILD_TAG }}-sha256
+          path: SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
 
