@@ -77,19 +77,27 @@ jobs:
           ./gradlew testDebugUnitTest --no-daemon --no-parallel 2>&1 | tee /tmp/unit-test.log
         shell: bash
 
-      - name: Build
+      - name: Build (standard + ad)
         run: |
           chmod +x gradlew
-          ./gradlew assemble${{ github.event.inputs.build_type == 'release' && 'Release' || 'Debug' }} --no-daemon --no-parallel 2>&1 | tee /tmp/build.log
+          TASK="assemble${{ github.event.inputs.build_type == 'release' && 'Release' || 'Debug' }}"
+          SRC="app/build/outputs/apk/${{ github.event.inputs.build_type }}/app-${{ github.event.inputs.build_type }}.apk"
+          ./gradlew "$TASK" -PadEdition=false --no-daemon --no-parallel 2>&1 | tee /tmp/build-standard.log
+          test -f "$SRC" || { echo "::error::standard APK 未生成"; exit 1; }
+          cp "$SRC" /tmp/standard.apk
+          ./gradlew "$TASK" -PadEdition=true --no-daemon --no-parallel 2>&1 | tee /tmp/build-ad.log
+          test -f "$SRC" || { echo "::error::ad APK 未生成"; exit 1; }
+          cp "$SRC" /tmp/ad.apk
+          cat /tmp/build-standard.log /tmp/build-ad.log > /tmp/build.log
         shell: bash
 
       - name: Prepare artifacts
         run: |
-          APK_PATH="app/build/outputs/apk/${{ github.event.inputs.build_type }}/app-${{ github.event.inputs.build_type }}.apk"
-          VERSION=$(grep versionName app/build.gradle.kts | head -1 | sed 's/.*= "//;s/".*//')
-          VERSION_CODE=$(grep versionCode app/build.gradle.kts | head -1 | sed 's/.*= //')
+          VERSION=$(grep -m1 'versionName =' app/build.gradle.kts | sed 's/.*= *"//;s/".*//')
+          VERSION_CODE=$(grep -m1 'versionCode =' app/build.gradle.kts | sed 's/.*= *//')
           BUILD_TAG="${VERSION}.${VERSION_CODE}_$(date +%Y%m%d_%H%M%S)"
-          cp "$APK_PATH" "Starsea_${BUILD_TAG}.apk"
+          cp /tmp/standard.apk "Starsea_${BUILD_TAG}_standard.apk"
+          cp /tmp/ad.apk "Starsea_${BUILD_TAG}_ad.apk"
           # gopeed .so → 改名 .zip 上传（蓝奏云不支持 .so 后缀）
           SO_FILE=$(find app/src/main/jniLibs -name 'libgojni.so' 2>/dev/null | head -1)
           if [ -n "$SO_FILE" ]; then cp "$SO_FILE" "libgojni_${BUILD_TAG}.zip" 2>/dev/null; fi
@@ -105,8 +113,9 @@ jobs:
           LANZOU_USER: ${{ secrets.LANZOU_USER }}
           LANZOU_PASS: ${{ secrets.LANZOU_PASS }}
         run: |
-          python3 scripts/lanzou_upload.py upload-nolog "Starsea_${{ env.BUILD_TAG }}.apk" "Starsea_${{ env.BUILD_TAG }}.apk" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
-          echo "PROTECT_NAME=Starsea_${{ env.BUILD_TAG }}.apk" >> $GITHUB_ENV
+          python3 scripts/lanzou_upload.py upload-nolog "Starsea_${{ env.BUILD_TAG }}_standard.apk" "Starsea_${{ env.BUILD_TAG }}_standard.apk" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          python3 scripts/lanzou_upload.py upload-nolog "Starsea_${{ env.BUILD_TAG }}_ad.apk" "Starsea_${{ env.BUILD_TAG }}_ad.apk" "Build" "$LANZOU_USER" "$LANZOU_PASS" 2>/dev/null || true
+          echo "PROTECT_NAME=Starsea_${{ env.BUILD_TAG }}_standard.apk,Starsea_${{ env.BUILD_TAG }}_ad.apk" >> $GITHUB_ENV
 
       - name: Upload .so to Lanzou (Build folder)
         env:
