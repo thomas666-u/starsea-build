@@ -114,35 +114,44 @@ jobs:
             exit 1
           }
 
-      - name: Build APK
+      - name: Build APK (standard + ad)
         run: |
           set -o pipefail
           chmod +x gradlew
           TASK=$([ "$BUILD_TYPE" = "debug" ] && echo assembleDebug || echo assembleRelease)
-          echo "task=$TASK"
-          # 过滤 R8 的 kotlin metadata 重复告警（无害但会冲走有用日志），完整日志落盘
-          ./gradlew "$TASK" --no-daemon --no-parallel --build-cache 2>&1 \
-            | tee /tmp/build.log \
+          SRC="app/build/outputs/apk/${BUILD_TYPE}/app-${BUILD_TYPE}.apk"
+          echo "task=$TASK (standard + ad)"
+          ./gradlew "$TASK" -PadEdition=false --no-daemon --no-parallel --build-cache 2>&1 \
+            | tee /tmp/build-standard.log \
             | grep -v 'An error occurred when parsing kotlin metadata'
+          test -f "$SRC" || { echo "::error::standard APK 未生成"; exit 1; }
+          cp "$SRC" /tmp/standard.apk
+          ./gradlew "$TASK" -PadEdition=true --no-daemon --no-parallel --build-cache 2>&1 \
+            | tee /tmp/build-ad.log \
+            | grep -v 'An error occurred when parsing kotlin metadata'
+          test -f "$SRC" || { echo "::error::ad APK 未生成"; exit 1; }
+          cp "$SRC" /tmp/ad.apk
+          cat /tmp/build-standard.log /tmp/build-ad.log > /tmp/build.log
         shell: bash
 
       - name: Prepare artifact name
         if: always()
         run: |
-          VERSION=$(grep -m1 'versionName' app/build.gradle.kts | sed 's/.*= *"//;s/".*//' || echo unknown)
-          VCODE=$(grep -m1 'versionCode' app/build.gradle.kts | sed 's/.*= *//' || echo 0)
+          VERSION=$(grep -m1 'versionName =' app/build.gradle.kts | sed 's/.*= *"//;s/".*//' || echo unknown)
+          VCODE=$(grep -m1 'versionCode =' app/build.gradle.kts | sed 's/.*= *//' || echo 0)
           echo "BUILD_TAG=${VERSION}.${VCODE}_$(date +%Y%m%d_%H%M%S)" >> $GITHUB_ENV
           echo "version=$VERSION ($VCODE)"
 
       - name: Rename APK
         if: always()
         run: |
-          SRC="app/build/outputs/apk/${BUILD_TYPE}/app-${BUILD_TYPE}.apk"
-          if [ -f "$SRC" ]; then
-            cp "$SRC" "Starsea_${BUILD_TAG}.apk"
-            ls -la "Starsea_${BUILD_TAG}.apk"
+          if [ -f /tmp/standard.apk ] && [ -f /tmp/ad.apk ]; then
+            cp /tmp/standard.apk "Starsea_${BUILD_TAG}_standard.apk"
+            cp /tmp/ad.apk "Starsea_${BUILD_TAG}_ad.apk"
+            ls -la "Starsea_${BUILD_TAG}_standard.apk" "Starsea_${BUILD_TAG}_ad.apk"
           else
-            echo "APK not found at $SRC"
+            echo "::error::缺少 standard/ad 产物"
+            exit 1
           fi
         shell: bash
 
@@ -160,6 +169,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Starsea-fast-log-${{ env.BUILD_TAG }}
-          path: /tmp/build.log
+          path: |
+            /tmp/build.log
+            /tmp/build-standard.log
+            /tmp/build-ad.log
           if-no-files-found: ignore
           retention-days: 7
